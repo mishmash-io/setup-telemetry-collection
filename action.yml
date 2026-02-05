@@ -14,8 +14,8 @@
 
 name: Setup OpenTelemetry signals collection
 description:
-  Setup OpenTelemetry SDKs and agents for various languages, instrument tests,
-  collect and save the telemetry, and make it available for further analytics
+  Setup OpenTelemetry agents and SDKs, instrument tests,
+  collect and save the telemetry, and make it available for analytics
 author: mishmash.io
 
 branding:
