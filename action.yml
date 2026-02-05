@@ -14,9 +14,8 @@
 
 name: Setup OpenTelemetry signals collection
 description:
-  Setup OpenTelemetry SDKs and agents for various languages, launch a backend
-  server to collect the data and then export signals captured during workflow
-  run
+  Setup OpenTelemetry SDKs and agents for various languages, instrument tests,
+  collect and save the telemetry, and make it available for further analytics
 author: mishmash.io
 
 branding:
