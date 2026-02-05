@@ -1,17 +1,29 @@
 # setup-telemetry-collection
 
-This action sets up [OpenTelemetry](https://opentelemetry.io/) in your CICD environment. Instrument your tests, run them and when your pipeline run finishes - telemetry `logs`, `metrics`, `traces` and `profiles` will be saved as [Apache Parquet](https://parquet.apache.org/) files. Use the files for analytics on top of your tests, before code reaches production.
+This action sets up [OpenTelemetry](https://opentelemetry.io/) in your CI/CD environment. Instrument your tests, run them and when your pipeline finishes - emitted `logs`, `metrics`, `traces` and `profiles` are available as [Apache Parquet](https://parquet.apache.org/) files. Use these files for analytics on the behaviour of your code, before code reaches production.
 
-For inspiration, see our [tests telemetry analytics tools.](https://github.com/mishmash-io/opentelemetry-server-embedded) 
+For inspiration, see [tests telemetry analytics @ mishmash.io.](https://github.com/mishmash-io/opentelemetry-server-embedded) 
 
 ## Usage
 
-Internally, this action downloads the necessary OpenTelemetry agents for your programming language(s) to your CICD worker and optionally caches them. It launches a [small OpenTelemetry backend server by mishmash io](https://github.com/mishmash-io/opentelemetry-server-embedded/tree/main/server-parquet) that saves the telemetry to disk and configures the OpenTelemetry agents and SDKs to send signals to that server. Once your CICD job is finished - the telemetry data is saved as an artifact of your build.
+Internally, this action:
+
+1. Downloads the necessary OpenTelemetry agents for your programming languages
+
+1. Optionally caches them
+
+1. Launches a [small backend server](https://github.com/mishmash-io/opentelemetry-server-embedded/tree/main/server-parquet) that saves the telemetry to disk
+
+1. Configures the OpenTelemetry agents and SDKs to send signals to that server
+
+1. Optionally launches tools for additional telemetry (see below)
+
+1. Once your CI/CD job completes - the action attaches the collected telemetry data as an artifact of your build.
 
 > [!TIP]
 > With this action you don't have to download OpenTelemetry agents or configure them, by, say, setting and exporting the numerous variables like `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_RESOURCE_ATTRIBUTES`, etc.
 >
-> The action does all that for you.
+> Setup-telemetry-collection does all that for you.
 
 To use this action simply add it as a step of a job in your `workflow.yaml`:
 
@@ -46,8 +58,8 @@ The following sections contain more details about the various configuration opti
 
 ### Supported telemetry signals
 
-This action can collect `logs`, `metrics`, `traces` and `profiles` signals. By default, only `logs`, `metrics` and `traces` are enabled. Enabling or disabling a given signal
-is done with the following boolean action inputs:
+This action configures emission and collection of `logs`, `metrics`, `traces` and `profiles` signals. By default, only `logs`, `metrics` and `traces` are enabled. To enable or disable a given signal
+set the following `boolean` action inputs:
 
 ```yaml
 - name: Setup telemetry collection
@@ -68,8 +80,7 @@ is done with the following boolean action inputs:
 
 ### Accessing collected data
 
-Once your workflow job has finished execution this action will upload an artifact (similarly to [actions/upload-artifact](https://github.com/actions/upload-artifact)) for each of the ***enabled*** signals. The default
-artifacts are named `telemetry-logs`, `telemetry-metrics`, `telemetry-traces` and `telemetry-profiles`, but the names are configurable:
+Similarly to [actions/upload-artifact](https://github.com/actions/upload-artifact), this action uploads one artifact for each of the ***enabled*** signals. Default artifacts are `telemetry-logs`, `telemetry-metrics`, `telemetry-traces` and `telemetry-profiles`, but you can change these names:
 
 ```yaml
 - name: Setup telemetry collection
@@ -87,21 +98,22 @@ artifacts are named `telemetry-logs`, `telemetry-metrics`, `telemetry-traces` an
     ...
 ```
 
-These build artifacts contain [Apache Parquet](https://parquet.apache.org/) files that can then be ingested externally by an analytics backend. For more information on how you can self-host an analytics backend, or for general information, like the schema of the files - see [mishmash io's tools for telemetry analytics repo.](https://github.com/mishmash-io/opentelemetry-server-embedded)
+The build artifacts contain [Apache Parquet](https://parquet.apache.org/) files with all signals of the given type. An external analytics backend can ingest them on regular intervals and provide sophisticated reports on the evolution of your code. For more information on how you can build your own analytics backend with open source; or for general information, like the schema of the files - see [mishmash.io's tools for telemetry analytics repository.](https://github.com/mishmash-io/opentelemetry-server-embedded)
 
 > [!TIP]
 >
-> If collection for a signal is enabled (its `save-*` option is `true`) artifact upload can be disabled by setting its `*-artifact` option to an empty string. This setup will collect and save the data
-> inside the worker, but will not upload it at the end.
+> If collection for a given signal is enabled (its `save-*` option is `true`) artifact upload can be
+> disabled by setting its `*-artifact` option to an empty string. Such a setup collects and saves the data
+> inside the worker, but doesn't upload it at the end.
 >
 
 ### Supported programming languages
 
 You can selectively enable or disable instrumentation for particular programming languages too.
 
-### Java
+#### Java
 
-To setup your environment for instrumenting java code add this to your workflow config:
+To setup your environment for instrumenting java code add this to your CI/CD workflow configuration:
 
 ```yaml
 - name: Setup telemetry collection
@@ -117,7 +129,7 @@ To setup your environment for instrumenting java code add this to your workflow 
     ...
 ```
 
-Or, if you would like to always use the latest version of it:
+Or, if you would like to always use the latest version of the agent:
 
 ```yaml
 - name: Setup telemetry collection
@@ -136,7 +148,7 @@ Or, if you would like to always use the latest version of it:
 ```
 
 When java instrumentation is enabled the action downloads the [OpenTelemetry Java zero-code agent](https://opentelemetry.io/docs/zero-code/java/agent/) and configures it. As you may need the path
-to this agent in subsequent workflow steps it is availble in the `java-agent` output of this action. You can use it like this:
+to this agent in subsequent workflow steps you can get the `java-agent` output of this action. Do it like this:
 
 ```yaml
 - name: Setup telemetry collection
@@ -159,22 +171,108 @@ to this agent in subsequent workflow steps it is availble in the `java-agent` ou
   run: mvn test
 ```
 
+#### Other programming languages
+
+TBD - 'watch' this repository for updates.
+
+### Operating system metrics
+
+If you would like to capture hardware- and OS- related metrics, like CPU, RAM, disk, and network usage, add the following to your configuration:
+
+```yaml
+- name: Setup telemetry collection
+  id: telemetry
+  uses: mishmash-io/setup-telemetry-collection@v1 # Set the latest version here
+  with:
+    # to collect OS- and hardware- related metrics:
+    collect-host-metrics: true
+    # optionally set a version of the OpenTelemetry host metrics collector:
+    host-collector-version: latest
+    # (optional) if you have a tool cache enabled on your worker you can use it to cache the download
+    cache-agents: true
+    ...
+```
+
+### Quick SQL to generate summaries
+
+You can tell this action to run small SQL scripts on the collected telemetry data. Configure with:
+
+```yaml
+- name: Setup telemetry collection
+  id: telemetry
+  uses: mishmash-io/setup-telemetry-collection@v1 # Set the latest version here
+  with:
+    # to run SQL scripts on collected telemetry:
+    summary-queries: summaries/*.sql # 'glob' your sql scripts with patterns here
+    ...
+```
+
+> [!IMPORTANT]
+>
+> Configure only light SQL scripts with short result sets. Focus perhaps on a few
+> key metrics or a limited number of error log messages. Don't run complex analytics on
+> your CI/CD runners, use an appropriate analytics backend instead.
+>
+> Get some [open source ideas here.](https://github.com/mishmash-io/opentelemetry-server-embedded)
+
+When you add SQL scripts, `setup-telemetry-collection` launches an in-memory [DuckDB](https://duckdb.org/) instance and runs your scripts in it. You can see the results of your queries on the Job summary page. 
+
+Take a look at some scripts in the [summaries/](summaries/) folder. These scripts run as part of the 'local' CI/CD and you can see their results. Go to [Actions page](https://github.com/mishmash-io/setup-telemetry-collection/actions/workflows/ci.yml), choose a recent build in the right section, and
+scroll down to see the summary.
+
+See an [example screenshot.](docs/images/sql-summaries-screenshot.png)
+
+### Additional configuration options
+
+In rare cases you might need to further customize your CI/CD steps telemetry.
+
+| Configuration option | Default value | Description |
+| --- | --- | --- |
+| `grpc-port`[^1] | 4317 | The OTLP (OpenTelemetry Line Protocol) over gRPC network port |
+| `http-port`[^1] | 4318 | The OTLP over HTTP network port |
+| `server-image` | `mishmashio/opentelemetry-parquet-server` | The docker image to use for the backend server, add `:version` at the end to bind to concrete version |
+| `cache-agents` | true | Use the runner's `tool-cache`[^2] to avoid repetitive downloads |
+| `github-token` | | See the [security section](#security-and-job-permissions) below |
+
+[^1]: Clients and servers are automatically configured to use the ports you specify, no additional configuration is needed
+[^2]: The `tool-cache` must be available on your workers before setting this configuration option
 
 ## Outputs
 
-## Using it to collect tests
+On successful completion, this action adds a number of outputs that you can use to further customize
+your CI/CD job.
 
-Comming soon...
+| Output | Available when | Usage | Description |
+| `java-agent` | `instrument-java: true` | `${{ steps.<setup-telemetry-collection-step>.outputs.java-agent }}` | Contains the path to the OpenTelemetry java auto-instrumentation agent |
+| `signals-path` | Always | `${{ steps.<setup-telemetry-collection-step>.outputs.signals-path }}` | Tells you where telemetry files are saved. |
+
+Additionally it sets a number of configuration settings needed by OpenTelemetry.
+
+### The job summary
+
+This step also publishes a summary. See [the summaries section](#quick-sql-to-generate-summaries) for an example.
+
+## Using it to collect tests telemetry
+
+Coming soon, 'watch' this repository to get notified.
+
+> [!TIP]
+>
+> See it in action - check out [this repository](https://github.com/mishmash-io/distributed-computing-stacks) where we're collecting telemetry from tests.
+>
 
 ## Limitations
 
-WARN - linux only for now...
+> [!CAUTION]
+>
+> At the moment `setup-telemetry-collection` works only on Linux runners.
+
 
 ## Security and job permissions
 
-For its simplest use this action does not require specific permissions or the use of a `GITHUB_TOKEN`.
+For its simplest scenarios this action doesn't require specific permissions or the use of a `GITHUB_TOKEN`.
 
-A `GITHUB_TOKEN` is only needed (and must be set in the `github-token` input parameter) when one or more of these input combinations are set:
+A `GITHUB_TOKEN` is only needed, and therefore must be set in the `github-token` input parameter, when one or more of these input combinations are set:
 
 ```yaml
 # java instrumentation is enabled and latest agent version is requested (which is the default configuration):
@@ -190,8 +288,7 @@ save-profiles: true
 profiler-version: latest
 ```
 
-If you wish to ***NOT*** provide a `GITHUB_TOKEN` to this action either disable all of the above, if you don't need them, or set `*-version` inputs to specific versions. Version numbers can be obtained
-from the official OpenTelemetry releases:
+If you wish to ***NOT*** provide a `GITHUB_TOKEN` to this action either disable all of the above, if you don't need them, or set `*-version` inputs to specific versions. Choose versions among the official OpenTelemetry releases:
 - [Official OpenTelemetry Java instrumentation agent releases](https://github.com/open-telemetry/opentelemetry-java-instrumentation/releases)
 - [Official OpenTelemetry Host metrics and profiler releases](https://github.com/open-telemetry/opentelemetry-collector-releases/releases)
 
@@ -250,20 +347,22 @@ committing_** though, make sure you run:
 npm run all
 ```
 
-> This step is important! It will run [`rollup`](https://rollupjs.org/) to build
-> the final JavaScript action code with all dependencies included. If you do not
+> [!CAUTION]
+>
+> This step is important! It runs [`rollup`](https://rollupjs.org/) to build
+> the final JavaScript action code with all dependencies included. If you don't
 > run this step, the action will not work correctly when it is used in a
 > workflow.
 
 ### Testing locally
 
 To test your changes locally on your computer you can use the
-[`@github/local-action`](https://github.com/github/local-action) utility. It is
+[`@github/local-action`](https://github.com/github/local-action) utility. It's
 a simple command-line tool that "stubs" (or simulates) the GitHub Actions
 Toolkit. This way, you can run this action locally without having to commit and
 push your changes.
 
-The `local-action` utility can be run in the following ways:
+Run the `local-action` utility in one of the following ways:
 
 - Visual Studio Code Debugger
 
@@ -308,9 +407,9 @@ See the [Code of conduct tab.](https://github.com/mishmash-io/setup-telemetry-co
 
 [![GitHub followers](https://img.shields.io/github/followers/mishmash-io)](https://github.com/mishmash-io) [![Bluesky posts](https://img.shields.io/bluesky/posts/mishmash.io)](https://bsky.app/profile/mishmash.io) [![GitHub Discussions](https://img.shields.io/github/discussions/mishmash-io/about?logo=github&logoColor=white)](https://github.com/orgs/mishmash-io/discussions) [![Discord](https://img.shields.io/discord/1208043287001169990?logo=discord&logoColor=white)](https://discord.gg/JqC6VMZTgJ)
 
-OpenTelemetry's main intent is the observability of production environments, but at [mishmash io](https://mishmash.io) it is part of our software development process. By saving telemetry from  **experiments** and **tests** of our own algorithms we ensure things like **performance** and **resource usage** of our distributed database, continuously and across releases.
+OpenTelemetry's main intent is the observability of production environments, but at [mishmash.io](https://mishmash.io) it's part of our software development process. By saving telemetry from  **experiments** and **tests** of our own algorithms we ensure things like **performance** and **resource usage** of our distributed database, continuously and across releases.
 
 We believe that adopting OpenTelemetry as a software development tool might be useful to you too, which is why we decided to open-source the tools we've built.
 
 Learn more about the broader set of [OpenTelemetry-related activities](https://mishmash.io/open_source/opentelemetry) at
-[mishmash io](https://mishmash.io/) and `follow` [GitHub profile](https://github.com/mishmash-io) for updates and new releases.
+[mishmash.io](https://mishmash.io/) and `follow` [GitHub profile](https://github.com/mishmash-io) for updates and new releases.
