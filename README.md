@@ -28,8 +28,10 @@ Internally, this action:
 1. Once your CI/CD job completes - the action attaches the collected telemetry
    data as an artifact of your build.
 
-> [!TIP] With this action you don't have to download OpenTelemetry agents or
-> configure them, by, say, setting and exporting the numerous variables like
+> [!TIP]
+>
+> With this action you don't have to download OpenTelemetry agents or configure
+> them, by, say, setting and exporting the numerous variables like
 > `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_RESOURCE_ATTRIBUTES`, etc.
 >
 > Setup-telemetry-collection does all that for you.
@@ -279,12 +281,11 @@ In rare cases you might need to further customize your CI/CD steps telemetry.
 On successful completion, this action adds a number of outputs that you can use
 to further customize your CI/CD job.
 
-| Output | Available when | Usage | Description | | `java-agent` |
-`instrument-java: true` |
-`${{ steps.<setup-telemetry-collection-step>.outputs.java-agent }}` | Contains
-the path to the OpenTelemetry java auto-instrumentation agent | | `signals-path`
-| Always | `${{ steps.<setup-telemetry-collection-step>.outputs.signals-path }}`
-| Tells you where telemetry files are saved. |
+| Output                                                        | Available when          | Usage                                                                 | Description                                |
+| ------------------------------------------------------------- | ----------------------- | --------------------------------------------------------------------- | ------------------------------------------ |
+| `java-agent`                                                  | `instrument-java: true` | `${{ steps.<setup-telemetry-collection-step>.outputs.java-agent }}`   | Contains                                   |
+| the path to the OpenTelemetry java auto-instrumentation agent |
+| `signals-path`                                                | Always                  | `${{ steps.<setup-telemetry-collection-step>.outputs.signals-path }}` | Tells you where telemetry files are saved. |
 
 Additionally it sets a number of configuration settings needed by OpenTelemetry.
 
