@@ -1,0 +1,144 @@
+#    Copyright 2026 Mishmash IO UK Ltd.
+#
+#  Licensed under the Apache License, Version 2.0 (the "License");
+#  you may not use this file except in compliance with the License.
+#  You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#  See the License for the specific language governing permissions and
+#  limitations under the License.
+
+name: Setup OpenTelemetry signals collection
+description:
+  Setup OpenTelemetry SDKs and agents for various languages, launch a backend
+  server to collect the data and then export signals captured during workflow
+  run
+author: mishmash.io
+
+branding:
+  icon: activity
+  color: blue
+
+inputs:
+  # General config options
+  github-token:
+    description:
+      An optional GitHub authentication token, needed for some features
+    required: false
+  cache-agents:
+    description: Use the GitHub tool cache for all instrumentation agents
+    required: false
+    default: true
+
+  # Enable/disable specific OpenTelemetry agents, etc
+  instrument-java:
+    description: Setup instrumentation for Java
+    required: false
+    default: true
+  java-agent-version:
+    description:
+      Java auto-instrumentation agent version to setup - set to a specific
+      version or 'latest'
+    required: false
+    default: 'latest'
+  collect-host-metrics:
+    description: Collect host metrics like CPU and memory usage, etc
+    required: false
+    default: true
+  profiler-version:
+    description:
+      Profiler version (used when save-profiles is true) - set to a specific
+      version or 'latest'
+    required: false
+    default: 'latest'
+  host-collector-version:
+    description:
+      Host collector version (used when collect-host-metrics is true) - set to a
+      specific version or 'latest'
+    required: false
+    default: 'latest'
+  server-image:
+    description:
+      The image to use for the OTLP backend server - append a ':<version>' at
+      the end to use a specific version
+    required: false
+    default: mishmashio/opentelemetry-parquet-server
+
+  # Backend server configuration options
+  grpc-port:
+    description: OTLP over gRPC port
+    required: false
+    default: 4317
+  http-port:
+    description: OTLP over HTTP port
+    required: false
+    default: 4318
+
+  # Logs signal configuration
+  save-logs:
+    description: Save OpenTelemetry Logs signals
+    required: false
+    default: true
+  logs-artifact:
+    description:
+      The name of a build artifact containing saved logs to publish (set to
+      empty string to disable publishing)
+    required: false
+    default: telemetry-logs
+
+  # Metrics signal configuration
+  save-metrics:
+    description: Save OpenTelemetry Metrics signals
+    required: false
+    default: true
+  metrics-artifact:
+    description:
+      The name of a build artifact containing saved metrics to publish (set to
+      empty string to disable publishing)
+    required: false
+    default: telemetry-metrics
+
+  # Traces signal configuration
+  save-traces:
+    description: Save OpenTelemetry Traces signal
+    required: false
+    default: true
+  traces-artifact:
+    description:
+      The name of a build artifact containing saved traces to publish (set to
+      empty string to disable publishing)
+    required: false
+    default: telemetry-traces
+
+  # Profiles signal configuration
+  save-profiles:
+    description: Save OpenTelemetry Profiles signals
+    required: false
+    default: false
+  profiles-artifact:
+    description:
+      The name of a build artifact containing saved profiles to publish (set to
+      empty string to disable publishing)
+    required: false
+    default: telemetry-profiles
+
+  # Summaries
+  summary-queries:
+    description: A glob that matches SQL files to run and generate summaries
+    required: false
+
+outputs:
+  java-agent:
+    description: Path to the configured java agent (if instrument-java is true)
+
+  signals-path:
+    description: Location where the signals files are saved
+
+runs:
+  using: node24
+  main: dist/index.js
+  post: dist/post.js

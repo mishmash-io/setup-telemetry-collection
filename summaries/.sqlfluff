@@ -1,0 +1,3 @@
+[sqlfluff]
+dialect = duckdb
+exclude_rules = ST06, RF01
