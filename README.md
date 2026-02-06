@@ -281,11 +281,10 @@ In rare cases you might need to further customize your CI/CD steps telemetry.
 On successful completion, this action adds a number of outputs that you can use
 to further customize your CI/CD job.
 
-| Output                                                        | Available when          | Usage                                                                 | Description                                |
-| ------------------------------------------------------------- | ----------------------- | --------------------------------------------------------------------- | ------------------------------------------ |
-| `java-agent`                                                  | `instrument-java: true` | `${{ steps.<setup-telemetry-collection-step>.outputs.java-agent }}`   | Contains                                   |
-| the path to the OpenTelemetry java auto-instrumentation agent |
-| `signals-path`                                                | Always                  | `${{ steps.<setup-telemetry-collection-step>.outputs.signals-path }}` | Tells you where telemetry files are saved. |
+| Output         | Available when          | Usage                                                                 | Description                                                            |
+| -------------- | ----------------------- | --------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| `java-agent`   | `instrument-java: true` | `${{ steps.<setup-telemetry-collection-step>.outputs.java-agent }}`   | Contains the path to the OpenTelemetry java auto-instrumentation agent |
+| `signals-path` | Always                  | `${{ steps.<setup-telemetry-collection-step>.outputs.signals-path }}` | Tells you where telemetry files are saved.                             |
 
 Additionally it sets a number of configuration settings needed by OpenTelemetry.
 
