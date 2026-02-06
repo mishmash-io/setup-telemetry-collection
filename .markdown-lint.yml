@@ -21,6 +21,7 @@ MD004:
 # Disable line length for tables
 MD013:
   tables: false
+  line_length: 120
 
 # Ordered list item prefix
 MD029:
