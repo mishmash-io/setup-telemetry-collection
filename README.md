@@ -137,7 +137,7 @@ languages too.
 
 #### Java
 
-To setup your environment for instrumenting java code add this to your CI/CD
+To setup your environment for instrumenting Java code add this to your CI/CD
 workflow configuration:
 
 ```yaml
@@ -172,7 +172,7 @@ Or, if you would like to always use the latest version of the agent:
     ...
 ```
 
-When java instrumentation is enabled the action downloads the
+When Java instrumentation is enabled the action downloads the
 [OpenTelemetry Java zero-code agent](https://opentelemetry.io/docs/zero-code/java/agent/)
 and configures it. As you may need the path to this agent in subsequent workflow
 steps you can get the `java-agent` output of this action. Do it like this:
@@ -264,7 +264,7 @@ In rare cases you might need to further customize your CI/CD steps telemetry.
 | -------------------- | ----------------------------------------- | ----------------------------------------------------------------------------------------------------- |
 | `grpc-port`[^1]      | 4317                                      | The OTLP (OpenTelemetry Line Protocol) over gRPC network port                                         |
 | `http-port`[^1]      | 4318                                      | The OTLP over HTTP network port                                                                       |
-| `server-image`       | `mishmashio/opentelemetry-parquet-server` | The docker image to use for the backend server, add `:version` at the end to bind to concrete version |
+| `server-image`       | `mishmashio/opentelemetry-parquet-server` | The Docker image to use for the backend server, add `:version` at the end to bind to concrete version |
 | `cache-agents`       | true                                      | Use the runner's `tool-cache`[^2] to avoid repetitive downloads                                       |
 | `github-token`       |                                           | See the [security section](#security-and-job-permissions) below                                       |
 
@@ -281,11 +281,10 @@ In rare cases you might need to further customize your CI/CD steps telemetry.
 On successful completion, this action adds a number of outputs that you can use
 to further customize your CI/CD job.
 
-| Output                                                        | Available when          | Usage                                                                 | Description                                |
-| ------------------------------------------------------------- | ----------------------- | --------------------------------------------------------------------- | ------------------------------------------ |
-| `java-agent`                                                  | `instrument-java: true` | `${{ steps.<setup-telemetry-collection-step>.outputs.java-agent }}`   | Contains                                   |
-| the path to the OpenTelemetry java auto-instrumentation agent |
-| `signals-path`                                                | Always                  | `${{ steps.<setup-telemetry-collection-step>.outputs.signals-path }}` | Tells you where telemetry files are saved. |
+| Output         | Available when          | Usage                                                                 | Description                                                            |
+| -------------- | ----------------------- | --------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| `java-agent`   | `instrument-java: true` | `${{ steps.<setup-telemetry-collection-step>.outputs.java-agent }}`   | Contains the path to the OpenTelemetry Java auto-instrumentation agent |
+| `signals-path` | Always                  | `${{ steps.<setup-telemetry-collection-step>.outputs.signals-path }}` | Tells you where telemetry files are saved.                             |
 
 Additionally it sets a number of configuration settings needed by OpenTelemetry.
 
