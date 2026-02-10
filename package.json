@@ -64,5 +64,10 @@
   },
   "optionalDependencies": {
     "@rollup/rollup-linux-x64-gnu": "*"
+  },
+  "overrides": {
+    "eslint-plugin-import": {
+      "eslint": "10.0.0"
+    }
   }
 }
