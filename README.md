@@ -2,7 +2,6 @@
 
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/mishmash-io/setup-telemetry-collection/badge)](https://scorecard.dev/viewer/?uri=github.com/mishmash-io/setup-telemetry-collection)
 
-
 This action sets up [OpenTelemetry](https://opentelemetry.io/) in your CI/CD
 environment. Instrument your tests, run them and when your pipeline finishes -
 emitted `logs`, `metrics`, `traces` and `profiles` are available as

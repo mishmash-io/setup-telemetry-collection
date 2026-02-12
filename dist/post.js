@@ -47334,7 +47334,7 @@ function requireCommon () {
 
 			const split = (typeof namespaces === 'string' ? namespaces : '')
 				.trim()
-				.replace(/\s+/g, ',')
+				.replace(' ', ',')
 				.split(',')
 				.filter(Boolean);
 
@@ -47686,7 +47686,7 @@ function requireBrowser () {
 		function load() {
 			let r;
 			try {
-				r = exports$1.storage.getItem('debug') || exports$1.storage.getItem('DEBUG') ;
+				r = exports$1.storage.getItem('debug');
 			} catch (error) {
 				// Swallow
 				// XXX (@Qix-) should we be logging these?
