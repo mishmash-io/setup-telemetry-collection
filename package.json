@@ -43,10 +43,13 @@
     "@actions/github": "^9.0.0",
     "@actions/glob": "^0.6.1",
     "@actions/tool-cache": "^4.0.0",
-    "@rollup/plugin-json": "^6.1.0"
+    "@eslint/js": "^10.0.1",
+    "@rollup/plugin-json": "^6.1.0",
+    "globals": "^17.3.0"
   },
   "devDependencies": {
     "@eslint/compat": "^2.0.2",
+    "@eslint/eslintrc": "^3.3.3",
     "@github/local-action": "^7.0.1",
     "@jest/globals": "^30.2.0",
     "@rollup/plugin-commonjs": "^29.0.0",
