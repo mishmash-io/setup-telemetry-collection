@@ -84905,7 +84905,7 @@ async function setupProfiler(shouldCache) {
 }
 
 async function getReleasedVersion(owner, repo, requestedVersion, safeVersion) {
-  let toolVersion = '';
+  var toolVersion;
 
   if (requestedVersion == 'latest') {
     // get the latest release in the repo
@@ -84936,7 +84936,8 @@ async function getReleasedVersion(owner, repo, requestedVersion, safeVersion) {
       );
     } catch (e) {
       throw new Error(
-        `Failed to get latest release of ${owner}/${repo}, error message: ${e.message}`
+        `Failed to get latest release of ${owner}/${repo}, error message: ${e.message}`,
+        { cause: e }
       )
     }
   } else if (requestedVersion) {
@@ -84961,7 +84962,8 @@ async function getReleasedVersion(owner, repo, requestedVersion, safeVersion) {
         );
       } catch (e) {
         throw new Error(
-          `Release version ${requestedVersion} does not exist in ${owner}/${repo}`
+          `Release version ${requestedVersion} does not exist in ${owner}/${repo}`,
+          { cause: e }
         )
       }
 

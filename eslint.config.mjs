@@ -47,10 +47,10 @@ export default [
   {
     plugins: {
       import: fixupPluginRules(_import),
+      js,
       jest,
       prettier
     },
-
     languageOptions: {
       globals: {
         ...globals.node,
