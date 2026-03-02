@@ -27887,7 +27887,7 @@ var MediaTypes$2;
     });
 };
 
-var __awaiter$j = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
+var __awaiter$k = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
         function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
@@ -27909,7 +27909,7 @@ class Summary {
      * @returns step summary file path
      */
     filePath() {
-        return __awaiter$j(this, void 0, void 0, function* () {
+        return __awaiter$k(this, void 0, void 0, function* () {
             if (this._filePath) {
                 return this._filePath;
             }
@@ -27953,7 +27953,7 @@ class Summary {
      * @returns {Promise<Summary>} summary instance
      */
     write(options) {
-        return __awaiter$j(this, void 0, void 0, function* () {
+        return __awaiter$k(this, void 0, void 0, function* () {
             const overwrite = !!(options === null || options === void 0 ? void 0 : options.overwrite);
             const filePath = yield this.filePath();
             const writeFunc = overwrite ? writeFile : appendFile;
@@ -27967,7 +27967,7 @@ class Summary {
      * @returns {Summary} summary instance
      */
     clear() {
-        return __awaiter$j(this, void 0, void 0, function* () {
+        return __awaiter$k(this, void 0, void 0, function* () {
             return this.emptyBuffer().write({ overwrite: true });
         });
     }
@@ -28160,7 +28160,7 @@ class Summary {
 const _summary = new Summary();
 const summary = _summary;
 
-var __awaiter$i = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
+var __awaiter$j = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
         function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
@@ -28174,7 +28174,7 @@ const { chmod: chmod$1, copyFile: copyFile$1, lstat: lstat$1, mkdir: mkdir$1, op
 const IS_WINDOWS$6 = process.platform === 'win32';
 fs.constants.O_RDONLY;
 function exists$1(fsPath) {
-    return __awaiter$i(this, void 0, void 0, function* () {
+    return __awaiter$j(this, void 0, void 0, function* () {
         try {
             yield stat$1(fsPath);
         }
@@ -28209,7 +28209,7 @@ function isRooted(p) {
  * @return if file exists and is executable, returns the file path. otherwise empty string.
  */
 function tryGetExecutablePath(filePath, extensions) {
-    return __awaiter$i(this, void 0, void 0, function* () {
+    return __awaiter$j(this, void 0, void 0, function* () {
         let stats = undefined;
         try {
             // test file exists
@@ -28302,7 +28302,7 @@ function isUnixExecutable(stats) {
             stats.uid === process.getuid()));
 }
 
-var __awaiter$h = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
+var __awaiter$i = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
         function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
@@ -28320,7 +28320,7 @@ var __awaiter$h = (undefined && undefined.__awaiter) || function (thisArg, _argu
  * @returns   Promise<string>   path to tool
  */
 function which(tool, check) {
-    return __awaiter$h(this, void 0, void 0, function* () {
+    return __awaiter$i(this, void 0, void 0, function* () {
         if (!tool) {
             throw new Error("parameter 'tool' is required");
         }
@@ -28350,7 +28350,7 @@ function which(tool, check) {
  * @returns   Promise<string[]>  the paths of the tool
  */
 function findInPath(tool) {
-    return __awaiter$h(this, void 0, void 0, function* () {
+    return __awaiter$i(this, void 0, void 0, function* () {
         if (!tool) {
             throw new Error("parameter 'tool' is required");
         }
@@ -28401,7 +28401,7 @@ function findInPath(tool) {
     });
 }
 
-var __awaiter$g = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
+var __awaiter$h = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
         function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
@@ -28749,7 +28749,7 @@ class ToolRunner extends require$$1.EventEmitter {
      * @returns   number
      */
     exec() {
-        return __awaiter$g(this, void 0, void 0, function* () {
+        return __awaiter$h(this, void 0, void 0, function* () {
             // root the tool path if it is unrooted and contains relative pathing
             if (!isRooted(this.toolPath) &&
                 (this.toolPath.includes('/') ||
@@ -28760,7 +28760,7 @@ class ToolRunner extends require$$1.EventEmitter {
             // if the tool is only a file name, then resolve it from the PATH
             // otherwise verify it exists (add extension on Windows if necessary)
             this.toolPath = yield which(this.toolPath, true);
-            return new Promise((resolve, reject) => __awaiter$g(this, void 0, void 0, function* () {
+            return new Promise((resolve, reject) => __awaiter$h(this, void 0, void 0, function* () {
                 this._debug(`exec tool: ${this.toolPath}`);
                 this._debug('arguments:');
                 for (const arg of this.args) {
@@ -28981,7 +28981,7 @@ class ExecState extends require$$1.EventEmitter {
     }
 }
 
-var __awaiter$f = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
+var __awaiter$g = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
         function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
@@ -29001,7 +29001,7 @@ var __awaiter$f = (undefined && undefined.__awaiter) || function (thisArg, _argu
  * @returns   Promise<number>    exit code
  */
 function exec(commandLine, args, options) {
-    return __awaiter$f(this, void 0, void 0, function* () {
+    return __awaiter$g(this, void 0, void 0, function* () {
         const commandArgs = argStringToArray(commandLine);
         if (commandArgs.length === 0) {
             throw new Error(`Parameter 'commandLine' cannot be null or empty.`);
@@ -29026,7 +29026,7 @@ function exec(commandLine, args, options) {
 os__default.platform();
 os__default.arch();
 
-var __awaiter$e = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
+var __awaiter$f = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
         function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
@@ -29188,7 +29188,7 @@ function endGroup() {
  * @param fn The function to wrap in the group
  */
 function group(name, fn) {
-    return __awaiter$e(this, void 0, void 0, function* () {
+    return __awaiter$f(this, void 0, void 0, function* () {
         startGroup(name);
         let result;
         try {
@@ -32949,7 +32949,7 @@ function requireLib$1 () {
 
 var libExports = requireLib$1();
 
-var __awaiter$d = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
+var __awaiter$e = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
         function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
@@ -32977,7 +32977,7 @@ function getProxyAgentDispatcher(destinationUrl) {
 }
 function getProxyFetch(destinationUrl) {
     const httpDispatcher = getProxyAgentDispatcher(destinationUrl);
-    const proxyFetch = (url, opts) => __awaiter$d(this, void 0, void 0, function* () {
+    const proxyFetch = (url, opts) => __awaiter$e(this, void 0, void 0, function* () {
         return undiciExports.fetch(url, Object.assign(Object.assign({}, opts), { dispatcher: httpDispatcher }));
     });
     return proxyFetch;
@@ -38622,7 +38622,7 @@ class SearchState {
     }
 }
 
-var __awaiter$c = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
+var __awaiter$d = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
         function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
@@ -38663,7 +38663,7 @@ class DefaultGlobber {
         return this.searchPaths.slice();
     }
     glob() {
-        return __awaiter$c(this, void 0, void 0, function* () {
+        return __awaiter$d(this, void 0, void 0, function* () {
             var _a, e_1, _b, _c;
             const result = [];
             try {
@@ -38765,7 +38765,7 @@ class DefaultGlobber {
      * Constructs a DefaultGlobber
      */
     static create(patterns, options) {
-        return __awaiter$c(this, void 0, void 0, function* () {
+        return __awaiter$d(this, void 0, void 0, function* () {
             const result = new DefaultGlobber(options);
             if (IS_WINDOWS) {
                 patterns = patterns.replace(/\r\n/g, '\n');
@@ -38787,7 +38787,7 @@ class DefaultGlobber {
         });
     }
     static stat(item, options, traversalChain) {
-        return __awaiter$c(this, void 0, void 0, function* () {
+        return __awaiter$d(this, void 0, void 0, function* () {
             // Note:
             // `stat` returns info about the target of a symlink (or symlink chain)
             // `lstat` returns info about a symlink itself
@@ -38850,7 +38850,7 @@ class DefaultGlobber {
     function settle(resolve, reject, d, v) { Promise.resolve(v).then(function(v) { resolve({ value: v, done: d }); }, reject); }
 };
 
-var __awaiter$b = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
+var __awaiter$c = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
         function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
@@ -38866,7 +38866,7 @@ var __awaiter$b = (undefined && undefined.__awaiter) || function (thisArg, _argu
  * @param options   Glob options
  */
 function create(patterns, options) {
-    return __awaiter$b(this, void 0, void 0, function* () {
+    return __awaiter$c(this, void 0, void 0, function* () {
         return yield DefaultGlobber.create(patterns, options);
     });
 }
@@ -42658,236 +42658,6 @@ class ServiceType {
 // @generated from protobuf file "results/api/v1/artifact.proto" (package "github.actions.results.api.v1", syntax proto3)
 // tslint:disable
 // @generated message type with reflection information, may provide speed optimized methods
-class MigrateArtifactRequest$Type extends MessageType {
-    constructor() {
-        super("github.actions.results.api.v1.MigrateArtifactRequest", [
-            { no: 1, name: "workflow_run_backend_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
-            { no: 2, name: "name", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
-            { no: 3, name: "expires_at", kind: "message", T: () => Timestamp }
-        ]);
-    }
-    create(value) {
-        const message = { workflowRunBackendId: "", name: "" };
-        globalThis.Object.defineProperty(message, MESSAGE_TYPE, { enumerable: false, value: this });
-        if (value !== undefined)
-            reflectionMergePartial(this, message, value);
-        return message;
-    }
-    internalBinaryRead(reader, length, options, target) {
-        let message = target !== null && target !== void 0 ? target : this.create(), end = reader.pos + length;
-        while (reader.pos < end) {
-            let [fieldNo, wireType] = reader.tag();
-            switch (fieldNo) {
-                case /* string workflow_run_backend_id */ 1:
-                    message.workflowRunBackendId = reader.string();
-                    break;
-                case /* string name */ 2:
-                    message.name = reader.string();
-                    break;
-                case /* google.protobuf.Timestamp expires_at */ 3:
-                    message.expiresAt = Timestamp.internalBinaryRead(reader, reader.uint32(), options, message.expiresAt);
-                    break;
-                default:
-                    let u = options.readUnknownField;
-                    if (u === "throw")
-                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
-                    let d = reader.skip(wireType);
-                    if (u !== false)
-                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
-            }
-        }
-        return message;
-    }
-    internalBinaryWrite(message, writer, options) {
-        /* string workflow_run_backend_id = 1; */
-        if (message.workflowRunBackendId !== "")
-            writer.tag(1, WireType.LengthDelimited).string(message.workflowRunBackendId);
-        /* string name = 2; */
-        if (message.name !== "")
-            writer.tag(2, WireType.LengthDelimited).string(message.name);
-        /* google.protobuf.Timestamp expires_at = 3; */
-        if (message.expiresAt)
-            Timestamp.internalBinaryWrite(message.expiresAt, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
-        let u = options.writeUnknownFields;
-        if (u !== false)
-            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
-        return writer;
-    }
-}
-/**
- * @generated MessageType for protobuf message github.actions.results.api.v1.MigrateArtifactRequest
- */
-const MigrateArtifactRequest = new MigrateArtifactRequest$Type();
-// @generated message type with reflection information, may provide speed optimized methods
-class MigrateArtifactResponse$Type extends MessageType {
-    constructor() {
-        super("github.actions.results.api.v1.MigrateArtifactResponse", [
-            { no: 1, name: "ok", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
-            { no: 2, name: "signed_upload_url", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
-        ]);
-    }
-    create(value) {
-        const message = { ok: false, signedUploadUrl: "" };
-        globalThis.Object.defineProperty(message, MESSAGE_TYPE, { enumerable: false, value: this });
-        if (value !== undefined)
-            reflectionMergePartial(this, message, value);
-        return message;
-    }
-    internalBinaryRead(reader, length, options, target) {
-        let message = target !== null && target !== void 0 ? target : this.create(), end = reader.pos + length;
-        while (reader.pos < end) {
-            let [fieldNo, wireType] = reader.tag();
-            switch (fieldNo) {
-                case /* bool ok */ 1:
-                    message.ok = reader.bool();
-                    break;
-                case /* string signed_upload_url */ 2:
-                    message.signedUploadUrl = reader.string();
-                    break;
-                default:
-                    let u = options.readUnknownField;
-                    if (u === "throw")
-                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
-                    let d = reader.skip(wireType);
-                    if (u !== false)
-                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
-            }
-        }
-        return message;
-    }
-    internalBinaryWrite(message, writer, options) {
-        /* bool ok = 1; */
-        if (message.ok !== false)
-            writer.tag(1, WireType.Varint).bool(message.ok);
-        /* string signed_upload_url = 2; */
-        if (message.signedUploadUrl !== "")
-            writer.tag(2, WireType.LengthDelimited).string(message.signedUploadUrl);
-        let u = options.writeUnknownFields;
-        if (u !== false)
-            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
-        return writer;
-    }
-}
-/**
- * @generated MessageType for protobuf message github.actions.results.api.v1.MigrateArtifactResponse
- */
-const MigrateArtifactResponse = new MigrateArtifactResponse$Type();
-// @generated message type with reflection information, may provide speed optimized methods
-class FinalizeMigratedArtifactRequest$Type extends MessageType {
-    constructor() {
-        super("github.actions.results.api.v1.FinalizeMigratedArtifactRequest", [
-            { no: 1, name: "workflow_run_backend_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
-            { no: 2, name: "name", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
-            { no: 3, name: "size", kind: "scalar", T: 3 /*ScalarType.INT64*/ }
-        ]);
-    }
-    create(value) {
-        const message = { workflowRunBackendId: "", name: "", size: "0" };
-        globalThis.Object.defineProperty(message, MESSAGE_TYPE, { enumerable: false, value: this });
-        if (value !== undefined)
-            reflectionMergePartial(this, message, value);
-        return message;
-    }
-    internalBinaryRead(reader, length, options, target) {
-        let message = target !== null && target !== void 0 ? target : this.create(), end = reader.pos + length;
-        while (reader.pos < end) {
-            let [fieldNo, wireType] = reader.tag();
-            switch (fieldNo) {
-                case /* string workflow_run_backend_id */ 1:
-                    message.workflowRunBackendId = reader.string();
-                    break;
-                case /* string name */ 2:
-                    message.name = reader.string();
-                    break;
-                case /* int64 size */ 3:
-                    message.size = reader.int64().toString();
-                    break;
-                default:
-                    let u = options.readUnknownField;
-                    if (u === "throw")
-                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
-                    let d = reader.skip(wireType);
-                    if (u !== false)
-                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
-            }
-        }
-        return message;
-    }
-    internalBinaryWrite(message, writer, options) {
-        /* string workflow_run_backend_id = 1; */
-        if (message.workflowRunBackendId !== "")
-            writer.tag(1, WireType.LengthDelimited).string(message.workflowRunBackendId);
-        /* string name = 2; */
-        if (message.name !== "")
-            writer.tag(2, WireType.LengthDelimited).string(message.name);
-        /* int64 size = 3; */
-        if (message.size !== "0")
-            writer.tag(3, WireType.Varint).int64(message.size);
-        let u = options.writeUnknownFields;
-        if (u !== false)
-            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
-        return writer;
-    }
-}
-/**
- * @generated MessageType for protobuf message github.actions.results.api.v1.FinalizeMigratedArtifactRequest
- */
-const FinalizeMigratedArtifactRequest = new FinalizeMigratedArtifactRequest$Type();
-// @generated message type with reflection information, may provide speed optimized methods
-class FinalizeMigratedArtifactResponse$Type extends MessageType {
-    constructor() {
-        super("github.actions.results.api.v1.FinalizeMigratedArtifactResponse", [
-            { no: 1, name: "ok", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
-            { no: 2, name: "artifact_id", kind: "scalar", T: 3 /*ScalarType.INT64*/ }
-        ]);
-    }
-    create(value) {
-        const message = { ok: false, artifactId: "0" };
-        globalThis.Object.defineProperty(message, MESSAGE_TYPE, { enumerable: false, value: this });
-        if (value !== undefined)
-            reflectionMergePartial(this, message, value);
-        return message;
-    }
-    internalBinaryRead(reader, length, options, target) {
-        let message = target !== null && target !== void 0 ? target : this.create(), end = reader.pos + length;
-        while (reader.pos < end) {
-            let [fieldNo, wireType] = reader.tag();
-            switch (fieldNo) {
-                case /* bool ok */ 1:
-                    message.ok = reader.bool();
-                    break;
-                case /* int64 artifact_id */ 2:
-                    message.artifactId = reader.int64().toString();
-                    break;
-                default:
-                    let u = options.readUnknownField;
-                    if (u === "throw")
-                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
-                    let d = reader.skip(wireType);
-                    if (u !== false)
-                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
-            }
-        }
-        return message;
-    }
-    internalBinaryWrite(message, writer, options) {
-        /* bool ok = 1; */
-        if (message.ok !== false)
-            writer.tag(1, WireType.Varint).bool(message.ok);
-        /* int64 artifact_id = 2; */
-        if (message.artifactId !== "0")
-            writer.tag(2, WireType.Varint).int64(message.artifactId);
-        let u = options.writeUnknownFields;
-        if (u !== false)
-            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
-        return writer;
-    }
-}
-/**
- * @generated MessageType for protobuf message github.actions.results.api.v1.FinalizeMigratedArtifactResponse
- */
-const FinalizeMigratedArtifactResponse = new FinalizeMigratedArtifactResponse$Type();
-// @generated message type with reflection information, may provide speed optimized methods
 class CreateArtifactRequest$Type extends MessageType {
     constructor() {
         super("github.actions.results.api.v1.CreateArtifactRequest", [
@@ -42895,7 +42665,8 @@ class CreateArtifactRequest$Type extends MessageType {
             { no: 2, name: "workflow_job_run_backend_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 3, name: "name", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 4, name: "expires_at", kind: "message", T: () => Timestamp },
-            { no: 5, name: "version", kind: "scalar", T: 5 /*ScalarType.INT32*/ }
+            { no: 5, name: "version", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 6, name: "mime_type", kind: "message", T: () => StringValue }
         ]);
     }
     create(value) {
@@ -42925,6 +42696,9 @@ class CreateArtifactRequest$Type extends MessageType {
                 case /* int32 version */ 5:
                     message.version = reader.int32();
                     break;
+                case /* google.protobuf.StringValue mime_type */ 6:
+                    message.mimeType = StringValue.internalBinaryRead(reader, reader.uint32(), options, message.mimeType);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -42952,6 +42726,9 @@ class CreateArtifactRequest$Type extends MessageType {
         /* int32 version = 5; */
         if (message.version !== 0)
             writer.tag(5, WireType.Varint).int32(message.version);
+        /* google.protobuf.StringValue mime_type = 6; */
+        if (message.mimeType)
+            StringValue.internalBinaryWrite(message.mimeType, writer.tag(6, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -43217,7 +42994,7 @@ const ListArtifactsRequest = new ListArtifactsRequest$Type();
 class ListArtifactsResponse$Type extends MessageType {
     constructor() {
         super("github.actions.results.api.v1.ListArtifactsResponse", [
-            { no: 1, name: "artifacts", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => ListArtifactsResponse_MonolithArtifact }
+            { no: 1, name: "artifacts", kind: "message", repeat: 2 /*RepeatType.UNPACKED*/, T: () => ListArtifactsResponse_MonolithArtifact }
         ]);
     }
     create(value) {
@@ -43580,9 +43357,7 @@ new ServiceType("github.actions.results.api.v1.ArtifactService", [
     { name: "FinalizeArtifact", options: {}, I: FinalizeArtifactRequest, O: FinalizeArtifactResponse },
     { name: "ListArtifacts", options: {}, I: ListArtifactsRequest, O: ListArtifactsResponse },
     { name: "GetSignedArtifactURL", options: {}, I: GetSignedArtifactURLRequest, O: GetSignedArtifactURLResponse },
-    { name: "DeleteArtifact", options: {}, I: DeleteArtifactRequest, O: DeleteArtifactResponse },
-    { name: "MigrateArtifact", options: {}, I: MigrateArtifactRequest, O: MigrateArtifactResponse },
-    { name: "FinalizeMigratedArtifact", options: {}, I: FinalizeMigratedArtifactRequest, O: FinalizeMigratedArtifactResponse }
+    { name: "DeleteArtifact", options: {}, I: DeleteArtifactRequest, O: DeleteArtifactResponse }
 ]);
 
 class ArtifactServiceClientJSON {
@@ -43821,7 +43596,7 @@ class DecodedURL extends URL {
 }
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
-var __awaiter$a = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
+var __awaiter$b = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
         function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
@@ -43897,8 +43672,8 @@ class HttpClientResponse {
         this.message = message;
     }
     readBody() {
-        return __awaiter$a(this, void 0, void 0, function* () {
-            return new Promise((resolve) => __awaiter$a(this, void 0, void 0, function* () {
+        return __awaiter$b(this, void 0, void 0, function* () {
+            return new Promise((resolve) => __awaiter$b(this, void 0, void 0, function* () {
                 let output = Buffer.alloc(0);
                 this.message.on('data', (chunk) => {
                     output = Buffer.concat([output, chunk]);
@@ -43910,8 +43685,8 @@ class HttpClientResponse {
         });
     }
     readBodyBuffer() {
-        return __awaiter$a(this, void 0, void 0, function* () {
-            return new Promise((resolve) => __awaiter$a(this, void 0, void 0, function* () {
+        return __awaiter$b(this, void 0, void 0, function* () {
+            return new Promise((resolve) => __awaiter$b(this, void 0, void 0, function* () {
                 const chunks = [];
                 this.message.on('data', (chunk) => {
                     chunks.push(chunk);
@@ -43962,42 +43737,42 @@ class HttpClient {
         }
     }
     options(requestUrl, additionalHeaders) {
-        return __awaiter$a(this, void 0, void 0, function* () {
+        return __awaiter$b(this, void 0, void 0, function* () {
             return this.request('OPTIONS', requestUrl, null, additionalHeaders || {});
         });
     }
     get(requestUrl, additionalHeaders) {
-        return __awaiter$a(this, void 0, void 0, function* () {
+        return __awaiter$b(this, void 0, void 0, function* () {
             return this.request('GET', requestUrl, null, additionalHeaders || {});
         });
     }
     del(requestUrl, additionalHeaders) {
-        return __awaiter$a(this, void 0, void 0, function* () {
+        return __awaiter$b(this, void 0, void 0, function* () {
             return this.request('DELETE', requestUrl, null, additionalHeaders || {});
         });
     }
     post(requestUrl, data, additionalHeaders) {
-        return __awaiter$a(this, void 0, void 0, function* () {
+        return __awaiter$b(this, void 0, void 0, function* () {
             return this.request('POST', requestUrl, data, additionalHeaders || {});
         });
     }
     patch(requestUrl, data, additionalHeaders) {
-        return __awaiter$a(this, void 0, void 0, function* () {
+        return __awaiter$b(this, void 0, void 0, function* () {
             return this.request('PATCH', requestUrl, data, additionalHeaders || {});
         });
     }
     put(requestUrl, data, additionalHeaders) {
-        return __awaiter$a(this, void 0, void 0, function* () {
+        return __awaiter$b(this, void 0, void 0, function* () {
             return this.request('PUT', requestUrl, data, additionalHeaders || {});
         });
     }
     head(requestUrl, additionalHeaders) {
-        return __awaiter$a(this, void 0, void 0, function* () {
+        return __awaiter$b(this, void 0, void 0, function* () {
             return this.request('HEAD', requestUrl, null, additionalHeaders || {});
         });
     }
     sendStream(verb, requestUrl, stream, additionalHeaders) {
-        return __awaiter$a(this, void 0, void 0, function* () {
+        return __awaiter$b(this, void 0, void 0, function* () {
             return this.request(verb, requestUrl, stream, additionalHeaders);
         });
     }
@@ -44006,14 +43781,14 @@ class HttpClient {
      * Be aware that not found returns a null.  Other errors (4xx, 5xx) reject the promise
      */
     getJson(requestUrl_1) {
-        return __awaiter$a(this, arguments, void 0, function* (requestUrl, additionalHeaders = {}) {
+        return __awaiter$b(this, arguments, void 0, function* (requestUrl, additionalHeaders = {}) {
             additionalHeaders[Headers.Accept] = this._getExistingOrDefaultHeader(additionalHeaders, Headers.Accept, MediaTypes.ApplicationJson);
             const res = yield this.get(requestUrl, additionalHeaders);
             return this._processResponse(res, this.requestOptions);
         });
     }
     postJson(requestUrl_1, obj_1) {
-        return __awaiter$a(this, arguments, void 0, function* (requestUrl, obj, additionalHeaders = {}) {
+        return __awaiter$b(this, arguments, void 0, function* (requestUrl, obj, additionalHeaders = {}) {
             const data = JSON.stringify(obj, null, 2);
             additionalHeaders[Headers.Accept] = this._getExistingOrDefaultHeader(additionalHeaders, Headers.Accept, MediaTypes.ApplicationJson);
             additionalHeaders[Headers.ContentType] =
@@ -44023,7 +43798,7 @@ class HttpClient {
         });
     }
     putJson(requestUrl_1, obj_1) {
-        return __awaiter$a(this, arguments, void 0, function* (requestUrl, obj, additionalHeaders = {}) {
+        return __awaiter$b(this, arguments, void 0, function* (requestUrl, obj, additionalHeaders = {}) {
             const data = JSON.stringify(obj, null, 2);
             additionalHeaders[Headers.Accept] = this._getExistingOrDefaultHeader(additionalHeaders, Headers.Accept, MediaTypes.ApplicationJson);
             additionalHeaders[Headers.ContentType] =
@@ -44033,7 +43808,7 @@ class HttpClient {
         });
     }
     patchJson(requestUrl_1, obj_1) {
-        return __awaiter$a(this, arguments, void 0, function* (requestUrl, obj, additionalHeaders = {}) {
+        return __awaiter$b(this, arguments, void 0, function* (requestUrl, obj, additionalHeaders = {}) {
             const data = JSON.stringify(obj, null, 2);
             additionalHeaders[Headers.Accept] = this._getExistingOrDefaultHeader(additionalHeaders, Headers.Accept, MediaTypes.ApplicationJson);
             additionalHeaders[Headers.ContentType] =
@@ -44048,7 +43823,7 @@ class HttpClient {
      * Prefer get, del, post and patch
      */
     request(verb, requestUrl, data, headers) {
-        return __awaiter$a(this, void 0, void 0, function* () {
+        return __awaiter$b(this, void 0, void 0, function* () {
             if (this._disposed) {
                 throw new Error('Client has already been disposed.');
             }
@@ -44144,7 +43919,7 @@ class HttpClient {
      * @param data
      */
     requestRaw(info, data) {
-        return __awaiter$a(this, void 0, void 0, function* () {
+        return __awaiter$b(this, void 0, void 0, function* () {
             return new Promise((resolve, reject) => {
                 function callbackForResult(err, res) {
                     if (err) {
@@ -44425,15 +44200,15 @@ class HttpClient {
         return baseUserAgent;
     }
     _performExponentialBackoff(retryNumber) {
-        return __awaiter$a(this, void 0, void 0, function* () {
+        return __awaiter$b(this, void 0, void 0, function* () {
             retryNumber = Math.min(ExponentialBackoffCeiling, retryNumber);
             const ms = ExponentialBackoffTimeSlice * Math.pow(2, retryNumber);
             return new Promise(resolve => setTimeout(() => resolve(), ms));
         });
     }
     _processResponse(res, options) {
-        return __awaiter$a(this, void 0, void 0, function* () {
-            return new Promise((resolve, reject) => __awaiter$a(this, void 0, void 0, function* () {
+        return __awaiter$b(this, void 0, void 0, function* () {
+            return new Promise((resolve, reject) => __awaiter$b(this, void 0, void 0, function* () {
                 const statusCode = res.message.statusCode || 0;
                 const response = {
                     statusCode,
@@ -44499,7 +44274,7 @@ class HttpClient {
 }
 const lowercaseKeys = (obj) => Object.keys(obj).reduce((c, k) => ((c[k.toLowerCase()] = obj[k]), c), {});
 
-var __awaiter$9 = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
+var __awaiter$a = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
         function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
@@ -44525,13 +44300,13 @@ class BearerCredentialHandler {
         return false;
     }
     handleAuthentication() {
-        return __awaiter$9(this, void 0, void 0, function* () {
+        return __awaiter$a(this, void 0, void 0, function* () {
             throw new Error('not implemented');
         });
     }
 }
 
-var version$1 = "6.1.0";
+var version$1 = "6.2.0";
 var require$$0$1 = {
 	version: version$1};
 
@@ -44793,7 +44568,7 @@ function maskSecretUrls(body) {
     }
 }
 
-var __awaiter$8 = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
+var __awaiter$9 = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
         function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
@@ -44825,14 +44600,14 @@ class ArtifactHttpClient {
     // This function satisfies the Rpc interface. It is compatible with the JSON
     // JSON generated client.
     request(service, method, contentType, data) {
-        return __awaiter$8(this, void 0, void 0, function* () {
+        return __awaiter$9(this, void 0, void 0, function* () {
             const url = new URL(`/twirp/${service}/${method}`, this.baseUrl).href;
             debug(`[Request] ${method} ${url}`);
             const headers = {
                 'Content-Type': contentType
             };
             try {
-                const { body } = yield this.retryableRequest(() => __awaiter$8(this, void 0, void 0, function* () { return this.httpClient.post(url, JSON.stringify(data), headers); }));
+                const { body } = yield this.retryableRequest(() => __awaiter$9(this, void 0, void 0, function* () { return this.httpClient.post(url, JSON.stringify(data), headers); }));
                 return body;
             }
             catch (error) {
@@ -44841,7 +44616,7 @@ class ArtifactHttpClient {
         });
     }
     retryableRequest(operation) {
-        return __awaiter$8(this, void 0, void 0, function* () {
+        return __awaiter$9(this, void 0, void 0, function* () {
             let attempt = 0;
             let errorMessage = '';
             let rawBody = '';
@@ -44913,7 +44688,7 @@ class ArtifactHttpClient {
         return retryableStatusCodes.includes(statusCode);
     }
     sleep(milliseconds) {
-        return __awaiter$8(this, void 0, void 0, function* () {
+        return __awaiter$9(this, void 0, void 0, function* () {
             return new Promise(resolve => setTimeout(resolve, milliseconds));
         });
     }
@@ -53292,7 +53067,7 @@ function getAllMatches(string, regex) {
   return matches;
 }
 
-const isName = function(string) {
+const isName = function (string) {
   const match = regexName.exec(string);
   return !(match === null || typeof match === 'undefined');
 };
@@ -53300,9 +53075,6 @@ const isName = function(string) {
 function isExist(v) {
   return typeof v !== 'undefined';
 }
-
-// const fakeCall = function(a) {return a;};
-// const fakeCallNoReturn = function() {};
 
 const defaultOptions$2 = {
   allowBooleanAttributes: false, //A tag can have attributes without any value
@@ -53326,19 +53098,19 @@ function validate(xmlData, options) {
     // check for byte order mark (BOM)
     xmlData = xmlData.substr(1);
   }
-  
+
   for (let i = 0; i < xmlData.length; i++) {
 
-    if (xmlData[i] === '<' && xmlData[i+1] === '?') {
-      i+=2;
-      i = readPI(xmlData,i);
+    if (xmlData[i] === '<' && xmlData[i + 1] === '?') {
+      i += 2;
+      i = readPI(xmlData, i);
       if (i.err) return i;
-    }else if (xmlData[i] === '<') {
+    } else if (xmlData[i] === '<') {
       //starting of tag
       //read until you reach to '>' avoiding any '>' in attribute value
       let tagStartPos = i;
       i++;
-      
+
       if (xmlData[i] === '!') {
         i = readCommentAndCDATA(xmlData, i);
         continue;
@@ -53374,14 +53146,14 @@ function validate(xmlData, options) {
           if (tagName.trim().length === 0) {
             msg = "Invalid space after '<'.";
           } else {
-            msg = "Tag '"+tagName+"' is an invalid name.";
+            msg = "Tag '" + tagName + "' is an invalid name.";
           }
           return getErrorObject('InvalidTag', msg, getLineNumberForPosition(xmlData, i));
         }
 
         const result = readAttributeStr(xmlData, i);
         if (result === false) {
-          return getErrorObject('InvalidAttr', "Attributes for '"+tagName+"' have open quote.", getLineNumberForPosition(xmlData, i));
+          return getErrorObject('InvalidAttr', "Attributes for '" + tagName + "' have open quote.", getLineNumberForPosition(xmlData, i));
         }
         let attrStr = result.value;
         i = result.index;
@@ -53402,17 +53174,17 @@ function validate(xmlData, options) {
           }
         } else if (closingTag) {
           if (!result.tagClosed) {
-            return getErrorObject('InvalidTag', "Closing tag '"+tagName+"' doesn't have proper closing.", getLineNumberForPosition(xmlData, i));
+            return getErrorObject('InvalidTag', "Closing tag '" + tagName + "' doesn't have proper closing.", getLineNumberForPosition(xmlData, i));
           } else if (attrStr.trim().length > 0) {
-            return getErrorObject('InvalidTag', "Closing tag '"+tagName+"' can't have attributes or invalid starting.", getLineNumberForPosition(xmlData, tagStartPos));
+            return getErrorObject('InvalidTag', "Closing tag '" + tagName + "' can't have attributes or invalid starting.", getLineNumberForPosition(xmlData, tagStartPos));
           } else if (tags.length === 0) {
-            return getErrorObject('InvalidTag', "Closing tag '"+tagName+"' has not been opened.", getLineNumberForPosition(xmlData, tagStartPos));
+            return getErrorObject('InvalidTag', "Closing tag '" + tagName + "' has not been opened.", getLineNumberForPosition(xmlData, tagStartPos));
           } else {
             const otg = tags.pop();
             if (tagName !== otg.tagName) {
               let openPos = getLineNumberForPosition(xmlData, otg.tagStartPos);
               return getErrorObject('InvalidTag',
-                "Expected closing tag '"+otg.tagName+"' (opened in line "+openPos.line+", col "+openPos.col+") instead of closing tag '"+tagName+"'.",
+                "Expected closing tag '" + otg.tagName + "' (opened in line " + openPos.line + ", col " + openPos.col + ") instead of closing tag '" + tagName + "'.",
                 getLineNumberForPosition(xmlData, tagStartPos));
             }
 
@@ -53433,8 +53205,8 @@ function validate(xmlData, options) {
           //if the root level has been reached before ...
           if (reachedRoot === true) {
             return getErrorObject('InvalidXml', 'Multiple possible root nodes found.', getLineNumberForPosition(xmlData, i));
-          } else if(options.unpairedTags.indexOf(tagName) !== -1); else {
-            tags.push({tagName, tagStartPos});
+          } else if (options.unpairedTags.indexOf(tagName) !== -1) ; else {
+            tags.push({ tagName, tagStartPos });
           }
           tagFound = true;
         }
@@ -53448,7 +53220,7 @@ function validate(xmlData, options) {
               i++;
               i = readCommentAndCDATA(xmlData, i);
               continue;
-            } else if (xmlData[i+1] === '?') {
+            } else if (xmlData[i + 1] === '?') {
               i = readPI(xmlData, ++i);
               if (i.err) return i;
             } else {
@@ -53459,7 +53231,7 @@ function validate(xmlData, options) {
             if (afterAmp == -1)
               return getErrorObject('InvalidChar', "char '&' is not expected.", getLineNumberForPosition(xmlData, i));
             i = afterAmp;
-          }else {
+          } else {
             if (reachedRoot === true && !isWhiteSpace(xmlData[i])) {
               return getErrorObject('InvalidXml', "Extra text at the end", getLineNumberForPosition(xmlData, i));
             }
@@ -53470,27 +53242,27 @@ function validate(xmlData, options) {
         }
       }
     } else {
-      if ( isWhiteSpace(xmlData[i])) {
+      if (isWhiteSpace(xmlData[i])) {
         continue;
       }
-      return getErrorObject('InvalidChar', "char '"+xmlData[i]+"' is not expected.", getLineNumberForPosition(xmlData, i));
+      return getErrorObject('InvalidChar', "char '" + xmlData[i] + "' is not expected.", getLineNumberForPosition(xmlData, i));
     }
   }
 
   if (!tagFound) {
     return getErrorObject('InvalidXml', 'Start tag expected.', 1);
-  }else if (tags.length == 1) {
-      return getErrorObject('InvalidTag', "Unclosed tag '"+tags[0].tagName+"'.", getLineNumberForPosition(xmlData, tags[0].tagStartPos));
-  }else if (tags.length > 0) {
-      return getErrorObject('InvalidXml', "Invalid '"+
-          JSON.stringify(tags.map(t => t.tagName), null, 4).replace(/\r?\n/g, '')+
-          "' found.", {line: 1, col: 1});
+  } else if (tags.length == 1) {
+    return getErrorObject('InvalidTag', "Unclosed tag '" + tags[0].tagName + "'.", getLineNumberForPosition(xmlData, tags[0].tagStartPos));
+  } else if (tags.length > 0) {
+    return getErrorObject('InvalidXml', "Invalid '" +
+      JSON.stringify(tags.map(t => t.tagName), null, 4).replace(/\r?\n/g, '') +
+      "' found.", { line: 1, col: 1 });
   }
 
   return true;
 }
-function isWhiteSpace(char){
-  return char === ' ' || char === '\t' || char === '\n'  || char === '\r';
+function isWhiteSpace(char) {
+  return char === ' ' || char === '\t' || char === '\n' || char === '\r';
 }
 /**
  * Read Processing insstructions and skip
@@ -53624,25 +53396,25 @@ function validateAttributeString(attrStr, options) {
   for (let i = 0; i < matches.length; i++) {
     if (matches[i][1].length === 0) {
       //nospace before attribute name: a="sd"b="saf"
-      return getErrorObject('InvalidAttr', "Attribute '"+matches[i][2]+"' has no space in starting.", getPositionFromMatch(matches[i]))
+      return getErrorObject('InvalidAttr', "Attribute '" + matches[i][2] + "' has no space in starting.", getPositionFromMatch(matches[i]))
     } else if (matches[i][3] !== undefined && matches[i][4] === undefined) {
-      return getErrorObject('InvalidAttr', "Attribute '"+matches[i][2]+"' is without value.", getPositionFromMatch(matches[i]));
+      return getErrorObject('InvalidAttr', "Attribute '" + matches[i][2] + "' is without value.", getPositionFromMatch(matches[i]));
     } else if (matches[i][3] === undefined && !options.allowBooleanAttributes) {
       //independent attribute: ab
-      return getErrorObject('InvalidAttr', "boolean attribute '"+matches[i][2]+"' is not allowed.", getPositionFromMatch(matches[i]));
+      return getErrorObject('InvalidAttr', "boolean attribute '" + matches[i][2] + "' is not allowed.", getPositionFromMatch(matches[i]));
     }
     /* else if(matches[i][6] === undefined){//attribute without value: ab=
                     return { err: { code:"InvalidAttr",msg:"attribute " + matches[i][2] + " has no value assigned."}};
                 } */
     const attrName = matches[i][2];
     if (!validateAttrName(attrName)) {
-      return getErrorObject('InvalidAttr', "Attribute '"+attrName+"' is an invalid name.", getPositionFromMatch(matches[i]));
+      return getErrorObject('InvalidAttr', "Attribute '" + attrName + "' is an invalid name.", getPositionFromMatch(matches[i]));
     }
-    if (!attrNames.hasOwnProperty(attrName)) {
+    if (!Object.prototype.hasOwnProperty.call(attrNames, attrName)) {
       //check for duplicate attribute.
       attrNames[attrName] = 1;
     } else {
-      return getErrorObject('InvalidAttr', "Attribute '"+attrName+"' is repeated.", getPositionFromMatch(matches[i]));
+      return getErrorObject('InvalidAttr', "Attribute '" + attrName + "' is repeated.", getPositionFromMatch(matches[i]));
     }
   }
 
@@ -53761,6 +53533,8 @@ const defaultOptions$1 = {
   },
   // skipEmptyListItem: false
   captureMetaData: false,
+  maxNestedTags: 100,
+  strictReservedNames: true,
 };
 
 /**
@@ -53816,23 +53590,23 @@ if (typeof Symbol !== "function") {
   METADATA_SYMBOL$1 = Symbol("XML Node Metadata");
 }
 
-class XmlNode{
+class XmlNode {
   constructor(tagname) {
     this.tagname = tagname;
     this.child = []; //nested tags, text, cdata, comments in order
-    this[":@"] = {}; //attributes map
+    this[":@"] = Object.create(null); //attributes map
   }
-  add(key,val){
+  add(key, val) {
     // this.child.push( {name : key, val: val, isCdata: isCdata });
-    if(key === "__proto__") key = "#__proto__";
-    this.child.push( {[key]: val });
+    if (key === "__proto__") key = "#__proto__";
+    this.child.push({ [key]: val });
   }
   addChild(node, startIndex) {
-    if(node.tagname === "__proto__") node.tagname = "#__proto__";
-    if(node[":@"] && Object.keys(node[":@"]).length > 0){
-      this.child.push( { [node.tagname]: node.child, [":@"]: node[":@"] });
-    }else {
-      this.child.push( { [node.tagname]: node.child });
+    if (node.tagname === "__proto__") node.tagname = "#__proto__";
+    if (node[":@"] && Object.keys(node[":@"]).length > 0) {
+      this.child.push({ [node.tagname]: node.child, [":@"]: node[":@"] });
+    } else {
+      this.child.push({ [node.tagname]: node.child });
     }
     // if requested, add the startIndex
     if (startIndex !== undefined) {
@@ -53855,7 +53629,7 @@ class DocTypeReader {
 
     readDocType(xmlData, i) {
 
-        const entities = {};
+        const entities = Object.create(null);
         if (xmlData[i + 3] === 'O' &&
             xmlData[i + 4] === 'C' &&
             xmlData[i + 5] === 'T' &&
@@ -54367,7 +54141,7 @@ function parse_int(numStr, base){
     else throw new Error("parseInt, Number.parseInt, window.parseInt are not supported")
 }
 
-function getIgnoreAttributesFn(ignoreAttributes) {
+function getIgnoreAttributesFn$1(ignoreAttributes) {
     if (typeof ignoreAttributes === 'function') {
         return ignoreAttributes
     }
@@ -54433,7 +54207,7 @@ class OrderedObjParser {
     this.readStopNodeData = readStopNodeData;
     this.saveTextToParentTag = saveTextToParentTag;
     this.addChild = addChild;
-    this.ignoreAttributesFn = getIgnoreAttributesFn(this.options.ignoreAttributes);
+    this.ignoreAttributesFn = getIgnoreAttributesFn$1(this.options.ignoreAttributes);
     this.entityExpansionCount = 0;
     this.currentExpandedLength = 0;
 
@@ -54542,6 +54316,7 @@ function buildAttributesMap(attrStr, jPath, tagName) {
           aName = this.options.transformAttributeName(aName);
         }
         if (aName === "__proto__") aName = "#__proto__";
+
         if (oldVal !== undefined) {
           if (this.options.trimValues) {
             oldVal = oldVal.trim();
@@ -54699,6 +54474,13 @@ const parseXml = function (xmlData) {
           tagName = newTagName;
         }
 
+        if (this.options.strictReservedNames &&
+          (tagName === this.options.commentPropName
+            || tagName === this.options.cdataPropName
+          )) {
+          throw new Error(`Invalid tag name: ${tagName}`);
+        }
+
         //save text as child node
         if (currentNode && textData) {
           if (currentNode.tagname !== '!xml') {
@@ -54783,9 +54565,23 @@ const parseXml = function (xmlData) {
             this.addChild(currentNode, childNode, jPath, startIndex);
             jPath = jPath.substr(0, jPath.lastIndexOf("."));
           }
+          else if(this.options.unpairedTags.indexOf(tagName) !== -1){//unpaired tag
+            const childNode = new XmlNode(tagName);
+            if(tagName !== tagExp && attrExpPresent){
+              childNode[":@"] = this.buildAttributesMap(tagExp, jPath);
+            }
+            this.addChild(currentNode, childNode, jPath, startIndex);
+            jPath = jPath.substr(0, jPath.lastIndexOf("."));
+            i = result.closeIndex;
+            // Continue to next iteration without changing currentNode
+            continue;
+          }
           //opening tag
           else {
             const childNode = new XmlNode(tagName);
+            if (this.tagsNodeStack.length > this.options.maxNestedTags) {
+              throw new Error("Maximum nested tags exceeded");
+            }
             this.tagsNodeStack.push(currentNode);
 
             if (tagName !== tagExp && attrExpPresent) {
@@ -54899,19 +54695,19 @@ const replaceEntitiesValue$1 = function (val, tagName, jPath) {
 };
 
 
-function saveTextToParentTag(textData, currentNode, jPath, isLeafNode) {
+function saveTextToParentTag(textData, parentNode, jPath, isLeafNode) {
   if (textData) { //store previously collected data as textNode
-    if (isLeafNode === undefined) isLeafNode = currentNode.child.length === 0;
+    if (isLeafNode === undefined) isLeafNode = parentNode.child.length === 0;
 
     textData = this.parseTextData(textData,
-      currentNode.tagname,
+      parentNode.tagname,
       jPath,
       false,
-      currentNode[":@"] ? Object.keys(currentNode[":@"]).length !== 0 : false,
+      parentNode[":@"] ? Object.keys(parentNode[":@"]).length !== 0 : false,
       isLeafNode);
 
     if (textData !== undefined && textData !== "")
-      currentNode.add(this.options.textNodeName, textData);
+      parentNode.add(this.options.textNodeName, textData);
     textData = "";
   }
   return textData;
@@ -55089,8 +54885,8 @@ const METADATA_SYMBOL = XmlNode.getMetaDataSymbol();
  * @param {any} options 
  * @returns 
  */
-function prettify(node, options){
-  return compress( node, options);
+function prettify(node, options) {
+  return compress(node, options);
 }
 
 /**
@@ -55100,78 +54896,82 @@ function prettify(node, options){
  * @param {string} jPath 
  * @returns object
  */
-function compress(arr, options, jPath){
+function compress(arr, options, jPath) {
   let text;
-  const compressedObj = {};
+  const compressedObj = {}; //This is intended to be a plain object
   for (let i = 0; i < arr.length; i++) {
     const tagObj = arr[i];
     const property = propName$1(tagObj);
     let newJpath = "";
-    if(jPath === undefined) newJpath = property;
+    if (jPath === undefined) newJpath = property;
     else newJpath = jPath + "." + property;
 
-    if(property === options.textNodeName){
-      if(text === undefined) text = tagObj[property];
+    if (property === options.textNodeName) {
+      if (text === undefined) text = tagObj[property];
       else text += "" + tagObj[property];
-    }else if(property === undefined){
+    } else if (property === undefined) {
       continue;
-    }else if(tagObj[property]){
-      
+    } else if (tagObj[property]) {
+
       let val = compress(tagObj[property], options, newJpath);
       const isLeaf = isLeafTag(val, options);
-      if (tagObj[METADATA_SYMBOL] !== undefined) {
-        val[METADATA_SYMBOL] = tagObj[METADATA_SYMBOL]; // copy over metadata
-      }
 
-      if(tagObj[":@"]){
-        assignAttributes( val, tagObj[":@"], newJpath, options);
-      }else if(Object.keys(val).length === 1 && val[options.textNodeName] !== undefined && !options.alwaysCreateTextNode){
+      if (tagObj[":@"]) {
+        assignAttributes(val, tagObj[":@"], newJpath, options);
+      } else if (Object.keys(val).length === 1 && val[options.textNodeName] !== undefined && !options.alwaysCreateTextNode) {
         val = val[options.textNodeName];
-      }else if(Object.keys(val).length === 0){
-        if(options.alwaysCreateTextNode) val[options.textNodeName] = "";
+      } else if (Object.keys(val).length === 0) {
+        if (options.alwaysCreateTextNode) val[options.textNodeName] = "";
         else val = "";
       }
 
-      if(compressedObj[property] !== undefined && compressedObj.hasOwnProperty(property)) {
-        if(!Array.isArray(compressedObj[property])) {
-            compressedObj[property] = [ compressedObj[property] ];
+      if (tagObj[METADATA_SYMBOL] !== undefined && typeof val === "object" && val !== null) {
+        val[METADATA_SYMBOL] = tagObj[METADATA_SYMBOL]; // copy over metadata
+      }
+
+
+      if (compressedObj[property] !== undefined && Object.prototype.hasOwnProperty.call(compressedObj, property)) {
+        if (!Array.isArray(compressedObj[property])) {
+          compressedObj[property] = [compressedObj[property]];
         }
         compressedObj[property].push(val);
-      }else {
+      } else {
         //TODO: if a node is not an array, then check if it should be an array
         //also determine if it is a leaf node
-        if (options.isArray(property, newJpath, isLeaf )) {
+        if (options.isArray(property, newJpath, isLeaf)) {
           compressedObj[property] = [val];
-        }else {
+        } else {
           compressedObj[property] = val;
         }
       }
     }
-    
+
   }
   // if(text && text.length > 0) compressedObj[options.textNodeName] = text;
-  if(typeof text === "string"){
-    if(text.length > 0) compressedObj[options.textNodeName] = text;
-  }else if(text !== undefined) compressedObj[options.textNodeName] = text;
+  if (typeof text === "string") {
+    if (text.length > 0) compressedObj[options.textNodeName] = text;
+  } else if (text !== undefined) compressedObj[options.textNodeName] = text;
+
+
   return compressedObj;
 }
 
-function propName$1(obj){
+function propName$1(obj) {
   const keys = Object.keys(obj);
   for (let i = 0; i < keys.length; i++) {
     const key = keys[i];
-    if(key !== ":@") return key;
+    if (key !== ":@") return key;
   }
 }
 
-function assignAttributes(obj, attrMap, jpath, options){
+function assignAttributes(obj, attrMap, jpath, options) {
   if (attrMap) {
     const keys = Object.keys(attrMap);
     const len = keys.length; //don't make it inline
     for (let i = 0; i < len; i++) {
       const atrrName = keys[i];
       if (options.isArray(atrrName, jpath + "." + atrrName, true, true)) {
-        obj[atrrName] = [ attrMap[atrrName] ];
+        obj[atrrName] = [attrMap[atrrName]];
       } else {
         obj[atrrName] = attrMap[atrrName];
       }
@@ -55179,10 +54979,10 @@ function assignAttributes(obj, attrMap, jpath, options){
   }
 }
 
-function isLeafTag(obj, options){
+function isLeafTag(obj, options) {
   const { textNodeName } = options;
   const propCount = Object.keys(obj).length;
-  
+
   if (propCount === 0) {
     return true;
   }
@@ -55197,37 +54997,37 @@ function isLeafTag(obj, options){
   return false;
 }
 
-class XMLParser{
-    
-    constructor(options){
+class XMLParser {
+
+    constructor(options) {
         this.externalEntities = {};
         this.options = buildOptions(options);
-        
+
     }
     /**
      * Parse XML dats to JS object 
      * @param {string|Uint8Array} xmlData 
      * @param {boolean|Object} validationOption 
      */
-    parse(xmlData,validationOption){
-        if(typeof xmlData !== "string" && xmlData.toString){
+    parse(xmlData, validationOption) {
+        if (typeof xmlData !== "string" && xmlData.toString) {
             xmlData = xmlData.toString();
-        }else if(typeof xmlData !== "string"){
+        } else if (typeof xmlData !== "string") {
             throw new Error("XML data is accepted in String or Bytes[] form.")
         }
-        
-        if( validationOption){
-            if(validationOption === true) validationOption = {}; //validate with default options
-            
+
+        if (validationOption) {
+            if (validationOption === true) validationOption = {}; //validate with default options
+
             const result = validate(xmlData, validationOption);
             if (result !== true) {
-              throw Error( `${result.err.msg}:${result.err.line}:${result.err.col}` )
+                throw Error(`${result.err.msg}:${result.err.line}:${result.err.col}`)
             }
-          }
+        }
         const orderedObjParser = new OrderedObjParser(this.options);
         orderedObjParser.addExternalEntities(this.externalEntities);
         const orderedResult = orderedObjParser.parseXml(xmlData);
-        if(this.options.preserveOrder || orderedResult === undefined) return orderedResult;
+        if (this.options.preserveOrder || orderedResult === undefined) return orderedResult;
         else return prettify(orderedResult, this.options);
     }
 
@@ -55236,14 +55036,14 @@ class XMLParser{
      * @param {string} key 
      * @param {string} value 
      */
-    addEntity(key, value){
-        if(value.indexOf("&") !== -1){
+    addEntity(key, value) {
+        if (value.indexOf("&") !== -1) {
             throw new Error("Entity value can't have '&'")
-        }else if(key.indexOf("&") !== -1 || key.indexOf(";") !== -1){
+        } else if (key.indexOf("&") !== -1 || key.indexOf(";") !== -1) {
             throw new Error("An entity must be set without '&' and ';'. Eg. use '#xD' for '&#xD;'")
-        }else if(value === "&"){
+        } else if (value === "&") {
             throw new Error("An entity with value '&' is not permitted");
-        }else {
+        } else {
             this.externalEntities[key] = value;
         }
     }
@@ -55283,10 +55083,21 @@ function arrToStr(arr, options, jPath, indentation) {
     let xmlStr = "";
     let isPreviousElementTag = false;
 
+
+    if (!Array.isArray(arr)) {
+        // Non-array values (e.g. string tag values) should be treated as text content
+        if (arr !== undefined && arr !== null) {
+            let text = arr.toString();
+            text = replaceEntitiesValue(text, options);
+            return text;
+        }
+        return "";
+    }
+
     for (let i = 0; i < arr.length; i++) {
         const tagObj = arr[i];
         const tagName = propName(tagObj);
-        if(tagName === undefined) continue;
+        if (tagName === undefined) continue;
 
         let newJPath = "";
         if (jPath.length === 0) newJPath = tagName;
@@ -55357,7 +55168,7 @@ function propName(obj) {
     const keys = Object.keys(obj);
     for (let i = 0; i < keys.length; i++) {
         const key = keys[i];
-        if(!obj.hasOwnProperty(key)) continue;
+        if (!Object.prototype.hasOwnProperty.call(obj, key)) continue;
         if (key !== ":@") return key;
     }
 }
@@ -55366,7 +55177,7 @@ function attr_to_str(attrMap, options) {
     let attrStr = "";
     if (attrMap && !options.ignoreAttributes) {
         for (let attr in attrMap) {
-            if(!attrMap.hasOwnProperty(attr)) continue;
+            if (!Object.prototype.hasOwnProperty.call(attrMap, attr)) continue;
             let attrVal = options.attributeValueProcessor(attr, attrMap[attr]);
             attrVal = replaceEntitiesValue(attrVal, options);
             if (attrVal === true && options.suppressBooleanAttributes) {
@@ -55398,6 +55209,25 @@ function replaceEntitiesValue(textValue, options) {
     return textValue;
 }
 
+function getIgnoreAttributesFn(ignoreAttributes) {
+    if (typeof ignoreAttributes === 'function') {
+        return ignoreAttributes
+    }
+    if (Array.isArray(ignoreAttributes)) {
+        return (attrName) => {
+            for (const pattern of ignoreAttributes) {
+                if (typeof pattern === 'string' && attrName === pattern) {
+                    return true
+                }
+                if (pattern instanceof RegExp && pattern.test(attrName)) {
+                    return true
+                }
+            }
+        }
+    }
+    return () => false
+}
+
 const defaultOptions = {
   attributeNamePrefix: '@_',
   attributesGroupName: false,
@@ -55409,10 +55239,10 @@ const defaultOptions = {
   suppressEmptyNode: false,
   suppressUnpairedNode: true,
   suppressBooleanAttributes: true,
-  tagValueProcessor: function(key, a) {
+  tagValueProcessor: function (key, a) {
     return a;
   },
-  attributeValueProcessor: function(attrName, a) {
+  attributeValueProcessor: function (attrName, a) {
     return a;
   },
   preserveOrder: false,
@@ -55435,7 +55265,7 @@ const defaultOptions = {
 function Builder(options) {
   this.options = Object.assign({}, defaultOptions, options);
   if (this.options.ignoreAttributes === true || this.options.attributesGroupName) {
-    this.isAttribute = function(/*a*/) {
+    this.isAttribute = function (/*a*/) {
       return false;
     };
   } else {
@@ -55451,7 +55281,7 @@ function Builder(options) {
     this.tagEndChar = '>\n';
     this.newLine = '\n';
   } else {
-    this.indentate = function() {
+    this.indentate = function () {
       return '';
     };
     this.tagEndChar = '>';
@@ -55459,25 +55289,25 @@ function Builder(options) {
   }
 }
 
-Builder.prototype.build = function(jObj) {
-  if(this.options.preserveOrder){
+Builder.prototype.build = function (jObj) {
+  if (this.options.preserveOrder) {
     return toXml(jObj, this.options);
-  }else {
-    if(Array.isArray(jObj) && this.options.arrayNodeName && this.options.arrayNodeName.length > 1){
+  } else {
+    if (Array.isArray(jObj) && this.options.arrayNodeName && this.options.arrayNodeName.length > 1) {
       jObj = {
-        [this.options.arrayNodeName] : jObj
+        [this.options.arrayNodeName]: jObj
       };
     }
     return this.j2x(jObj, 0, []).val;
   }
 };
 
-Builder.prototype.j2x = function(jObj, level, ajPath) {
+Builder.prototype.j2x = function (jObj, level, ajPath) {
   let attrStr = '';
   let val = '';
   const jPath = ajPath.join('.');
   for (let key in jObj) {
-    if(!Object.prototype.hasOwnProperty.call(jObj, key)) continue;
+    if (!Object.prototype.hasOwnProperty.call(jObj, key)) continue;
     if (typeof jObj[key] === 'undefined') {
       // supress undefined node only if it is not an attribute
       if (this.isAttribute(key)) {
@@ -55519,17 +55349,17 @@ Builder.prototype.j2x = function(jObj, level, ajPath) {
       for (let j = 0; j < arrLen; j++) {
         const item = jObj[key][j];
         if (typeof item === 'undefined') ; else if (item === null) {
-          if(key[0] === "?") val += this.indentate(level) + '<' + key + '?' + this.tagEndChar;
+          if (key[0] === "?") val += this.indentate(level) + '<' + key + '?' + this.tagEndChar;
           else val += this.indentate(level) + '<' + key + '/' + this.tagEndChar;
           // val += this.indentate(level) + '<' + key + '/' + this.tagEndChar;
         } else if (typeof item === 'object') {
-          if(this.options.oneListGroup){
+          if (this.options.oneListGroup) {
             const result = this.j2x(item, level + 1, ajPath.concat(key));
             listTagVal += result.val;
             if (this.options.attributesGroupName && item.hasOwnProperty(this.options.attributesGroupName)) {
               listTagAttr += result.attrStr;
             }
-          }else {
+          } else {
             listTagVal += this.processTextOrObjNode(item, key, level, ajPath);
           }
         } else {
@@ -55542,7 +55372,7 @@ Builder.prototype.j2x = function(jObj, level, ajPath) {
           }
         }
       }
-      if(this.options.oneListGroup){
+      if (this.options.oneListGroup) {
         listTagVal = this.buildObjectNode(listTagVal, key, listTagAttr, level);
       }
       val += listTagVal;
@@ -55559,10 +55389,10 @@ Builder.prototype.j2x = function(jObj, level, ajPath) {
       }
     }
   }
-  return {attrStr: attrStr, val: val};
+  return { attrStr: attrStr, val: val };
 };
 
-Builder.prototype.buildAttrPairStr = function(attrName, val){
+Builder.prototype.buildAttrPairStr = function (attrName, val) {
   val = this.options.attributeValueProcessor(attrName, '' + val);
   val = this.replaceEntitiesValue(val);
   if (this.options.suppressBooleanAttributes && val === "true") {
@@ -55570,7 +55400,7 @@ Builder.prototype.buildAttrPairStr = function(attrName, val){
   } else return ' ' + attrName + '="' + val + '"';
 };
 
-function processTextOrObjNode (object, key, level, ajPath) {
+function processTextOrObjNode(object, key, level, ajPath) {
   const result = this.j2x(object, level + 1, ajPath.concat(key));
   if (object[this.options.textNodeName] !== undefined && Object.keys(object).length === 1) {
     return this.buildTextValNode(object[this.options.textNodeName], key, result.attrStr, level);
@@ -55579,72 +55409,72 @@ function processTextOrObjNode (object, key, level, ajPath) {
   }
 }
 
-Builder.prototype.buildObjectNode = function(val, key, attrStr, level) {
-  if(val === ""){
-    if(key[0] === "?") return  this.indentate(level) + '<' + key + attrStr+ '?' + this.tagEndChar;
+Builder.prototype.buildObjectNode = function (val, key, attrStr, level) {
+  if (val === "") {
+    if (key[0] === "?") return this.indentate(level) + '<' + key + attrStr + '?' + this.tagEndChar;
     else {
       return this.indentate(level) + '<' + key + attrStr + this.closeTag(key) + this.tagEndChar;
     }
-  }else {
+  } else {
 
     let tagEndExp = '</' + key + this.tagEndChar;
     let piClosingChar = "";
-    
-    if(key[0] === "?") {
+
+    if (key[0] === "?") {
       piClosingChar = "?";
       tagEndExp = "";
     }
-  
+
     // attrStr is an empty string in case the attribute came as undefined or null
     if ((attrStr || attrStr === '') && val.indexOf('<') === -1) {
-      return ( this.indentate(level) + '<' +  key + attrStr + piClosingChar + '>' + val + tagEndExp );
+      return (this.indentate(level) + '<' + key + attrStr + piClosingChar + '>' + val + tagEndExp);
     } else if (this.options.commentPropName !== false && key === this.options.commentPropName && piClosingChar.length === 0) {
       return this.indentate(level) + `<!--${val}-->` + this.newLine;
-    }else {
+    } else {
       return (
         this.indentate(level) + '<' + key + attrStr + piClosingChar + this.tagEndChar +
         val +
-        this.indentate(level) + tagEndExp    );
+        this.indentate(level) + tagEndExp);
     }
   }
 };
 
-Builder.prototype.closeTag = function(key){
+Builder.prototype.closeTag = function (key) {
   let closeTag = "";
-  if(this.options.unpairedTags.indexOf(key) !== -1){ //unpaired
-    if(!this.options.suppressUnpairedNode) closeTag = "/";
-  }else if(this.options.suppressEmptyNode){ //empty
+  if (this.options.unpairedTags.indexOf(key) !== -1) { //unpaired
+    if (!this.options.suppressUnpairedNode) closeTag = "/";
+  } else if (this.options.suppressEmptyNode) { //empty
     closeTag = "/";
-  }else {
+  } else {
     closeTag = `></${key}`;
   }
   return closeTag;
 };
 
-Builder.prototype.buildTextValNode = function(val, key, attrStr, level) {
+Builder.prototype.buildTextValNode = function (val, key, attrStr, level) {
   if (this.options.cdataPropName !== false && key === this.options.cdataPropName) {
-    return this.indentate(level) + `<![CDATA[${val}]]>` +  this.newLine;
-  }else if (this.options.commentPropName !== false && key === this.options.commentPropName) {
-    return this.indentate(level) + `<!--${val}-->` +  this.newLine;
-  }else if(key[0] === "?") {//PI tag
-    return  this.indentate(level) + '<' + key + attrStr+ '?' + this.tagEndChar; 
-  }else {
+    return this.indentate(level) + `<![CDATA[${val}]]>` + this.newLine;
+  } else if (this.options.commentPropName !== false && key === this.options.commentPropName) {
+    return this.indentate(level) + `<!--${val}-->` + this.newLine;
+  } else if (key[0] === "?") {//PI tag
+    return this.indentate(level) + '<' + key + attrStr + '?' + this.tagEndChar;
+  } else {
     let textValue = this.options.tagValueProcessor(key, val);
     textValue = this.replaceEntitiesValue(textValue);
-  
-    if( textValue === ''){
+
+    if (textValue === '') {
       return this.indentate(level) + '<' + key + attrStr + this.closeTag(key) + this.tagEndChar;
-    }else {
+    } else {
       return this.indentate(level) + '<' + key + attrStr + '>' +
-         textValue +
+        textValue +
         '</' + key + this.tagEndChar;
     }
   }
 };
 
-Builder.prototype.replaceEntitiesValue = function(textValue){
-  if(textValue && textValue.length > 0 && this.options.processEntities){
-    for (let i=0; i<this.options.entities.length; i++) {
+Builder.prototype.replaceEntitiesValue = function (textValue) {
+  if (textValue && textValue.length > 0 && this.options.processEntities) {
+    for (let i = 0; i < this.options.entities.length; i++) {
       const entity = this.options.entities[i];
       textValue = textValue.replace(entity.regex, entity.val);
     }
@@ -79153,7 +78983,7 @@ class PageBlobClient extends BlobClient {
     }
 }
 
-var __awaiter$7 = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
+var __awaiter$8 = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
         function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
@@ -79162,12 +78992,12 @@ var __awaiter$7 = (undefined && undefined.__awaiter) || function (thisArg, _argu
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
-function uploadZipToBlobStorage(authenticatedUploadURL, zipUploadStream) {
-    return __awaiter$7(this, void 0, void 0, function* () {
+function uploadToBlobStorage(authenticatedUploadURL, uploadStream, contentType) {
+    return __awaiter$8(this, void 0, void 0, function* () {
         let uploadByteCount = 0;
         let lastProgressTime = Date.now();
         const abortController = new AbortController();
-        const chunkTimer = (interval) => __awaiter$7(this, void 0, void 0, function* () {
+        const chunkTimer = (interval) => __awaiter$8(this, void 0, void 0, function* () {
             return new Promise((resolve, reject) => {
                 const timer = setInterval(() => {
                     if (Date.now() - lastProgressTime > interval) {
@@ -79184,26 +79014,26 @@ function uploadZipToBlobStorage(authenticatedUploadURL, zipUploadStream) {
         const bufferSize = getUploadChunkSize();
         const blobClient = new BlobClient(authenticatedUploadURL);
         const blockBlobClient = blobClient.getBlockBlobClient();
-        debug(`Uploading artifact zip to blob storage with maxConcurrency: ${maxConcurrency}, bufferSize: ${bufferSize}`);
+        debug(`Uploading artifact to blob storage with maxConcurrency: ${maxConcurrency}, bufferSize: ${bufferSize}, contentType: ${contentType}`);
         const uploadCallback = (progress) => {
             info(`Uploaded bytes ${progress.loadedBytes}`);
             uploadByteCount = progress.loadedBytes;
             lastProgressTime = Date.now();
         };
         const options = {
-            blobHTTPHeaders: { blobContentType: 'zip' },
+            blobHTTPHeaders: { blobContentType: contentType },
             onProgress: uploadCallback,
             abortSignal: abortController.signal
         };
         let sha256Hash = undefined;
-        const uploadStream = new require$$0$2.PassThrough();
+        const blobUploadStream = new require$$0$2.PassThrough();
         const hashStream = crypto$1.createHash('sha256');
-        zipUploadStream.pipe(uploadStream); // This stream is used for the upload
-        zipUploadStream.pipe(hashStream).setEncoding('hex'); // This stream is used to compute a hash of the zip content that gets used. Integrity check
+        uploadStream.pipe(blobUploadStream); // This stream is used for the upload
+        uploadStream.pipe(hashStream).setEncoding('hex'); // This stream is used to compute a hash of the content for integrity check
         info('Beginning upload of artifact content to blob storage');
         try {
             yield Promise.race([
-                blockBlobClient.uploadStream(uploadStream, bufferSize, maxConcurrency, options),
+                blockBlobClient.uploadStream(blobUploadStream, bufferSize, maxConcurrency, options),
                 chunkTimer(getUploadChunkTimeout())
             ]);
         }
@@ -79219,7 +79049,7 @@ function uploadZipToBlobStorage(authenticatedUploadURL, zipUploadStream) {
         info('Finished uploading artifact content to blob storage!');
         hashStream.end();
         sha256Hash = hashStream.read();
-        info(`SHA256 digest of uploaded artifact zip is ${sha256Hash}`);
+        info(`SHA256 digest of uploaded artifact is ${sha256Hash}`);
         if (uploadByteCount === 0) {
             warning(`No data was uploaded to blob storage. Reported upload byte count is 0.`);
         }
@@ -117128,7 +116958,7 @@ function requireArchiver () {
 var archiverExports = requireArchiver();
 var archiver = /*@__PURE__*/getDefaultExportFromCjs(archiverExports);
 
-var __awaiter$6 = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
+var __awaiter$7 = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
         function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
@@ -117137,10 +116967,9 @@ var __awaiter$6 = (undefined && undefined.__awaiter) || function (thisArg, _argu
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
-const DEFAULT_COMPRESSION_LEVEL = 6;
 // Custom stream transformer so we can set the highWaterMark property
 // See https://github.com/nodejs/node/issues/8855
-class ZipUploadStream extends require$$0$2.Transform {
+class WaterMarkedUploadStream extends require$$0$2.Transform {
     constructor(bufferSize) {
         super({
             highWaterMark: bufferSize
@@ -117151,6 +116980,41 @@ class ZipUploadStream extends require$$0$2.Transform {
         cb(null, chunk);
     }
 }
+function createRawFileUploadStream(filePath) {
+    return __awaiter$7(this, void 0, void 0, function* () {
+        debug(`Creating raw file upload stream for: ${filePath}`);
+        const bufferSize = getUploadChunkSize();
+        const uploadStream = new WaterMarkedUploadStream(bufferSize);
+        // Check if symlink and resolve the source path
+        let sourcePath = filePath;
+        const stats = yield fs.promises.lstat(filePath);
+        if (stats.isSymbolicLink()) {
+            sourcePath = yield realpath(filePath);
+        }
+        // Create a read stream from the file and pipe it to the upload stream
+        const fileStream = fs.createReadStream(sourcePath, {
+            highWaterMark: bufferSize
+        });
+        fileStream.on('error', error => {
+            error$1('An error has occurred while reading the file for upload');
+            error$1(String(error));
+            uploadStream.destroy(new Error('An error has occurred during file read for the artifact'));
+        });
+        fileStream.pipe(uploadStream);
+        return uploadStream;
+    });
+}
+
+var __awaiter$6 = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments || [])).next());
+    });
+};
+const DEFAULT_COMPRESSION_LEVEL = 6;
 function createZipUploadStream(uploadSpecification_1) {
     return __awaiter$6(this, arguments, void 0, function* (uploadSpecification, compressionLevel = DEFAULT_COMPRESSION_LEVEL) {
         debug(`Creating Artifact archive with compressionLevel: ${compressionLevel}`);
@@ -117181,7 +117045,7 @@ function createZipUploadStream(uploadSpecification_1) {
             }
         }
         const bufferSize = getUploadChunkSize();
-        const zipUploadStream = new ZipUploadStream(bufferSize);
+        const zipUploadStream = new WaterMarkedUploadStream(bufferSize);
         debug(`Zip write high watermark value ${zipUploadStream.writableHighWaterMark}`);
         debug(`Zip read high watermark value ${zipUploadStream.readableHighWaterMark}`);
         zip.pipe(zipUploadStream);
@@ -117213,6 +117077,76 @@ const zipEndCallback = () => {
     debug('Zip stream for upload has ended.');
 };
 
+/**
+ * Maps file extensions to MIME types
+ */
+const mimeTypes = {
+    // Text
+    '.txt': 'text/plain',
+    '.html': 'text/html',
+    '.htm': 'text/html',
+    '.css': 'text/css',
+    '.csv': 'text/csv',
+    '.xml': 'text/xml',
+    '.md': 'text/markdown',
+    // JavaScript/JSON
+    '.js': 'application/javascript',
+    '.mjs': 'application/javascript',
+    '.json': 'application/json',
+    // Images
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.gif': 'image/gif',
+    '.svg': 'image/svg+xml',
+    '.webp': 'image/webp',
+    '.ico': 'image/x-icon',
+    '.bmp': 'image/bmp',
+    '.tiff': 'image/tiff',
+    '.tif': 'image/tiff',
+    // Audio
+    '.mp3': 'audio/mpeg',
+    '.wav': 'audio/wav',
+    '.ogg': 'audio/ogg',
+    '.flac': 'audio/flac',
+    // Video
+    '.mp4': 'video/mp4',
+    '.webm': 'video/webm',
+    '.avi': 'video/x-msvideo',
+    '.mov': 'video/quicktime',
+    // Documents
+    '.pdf': 'application/pdf',
+    '.doc': 'application/msword',
+    '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    '.xls': 'application/vnd.ms-excel',
+    '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    '.ppt': 'application/vnd.ms-powerpoint',
+    '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    // Archives
+    '.zip': 'application/zip',
+    '.tar': 'application/x-tar',
+    '.gz': 'application/gzip',
+    '.rar': 'application/vnd.rar',
+    '.7z': 'application/x-7z-compressed',
+    // Code/Data
+    '.wasm': 'application/wasm',
+    '.yaml': 'application/x-yaml',
+    '.yml': 'application/x-yaml',
+    // Fonts
+    '.woff': 'font/woff',
+    '.woff2': 'font/woff2',
+    '.ttf': 'font/ttf',
+    '.otf': 'font/otf',
+    '.eot': 'application/vnd.ms-fontobject'
+};
+/**
+ * Gets the MIME type for a file based on its extension
+ */
+function getMimeType(filePath) {
+    const ext = path$1.extname(filePath).toLowerCase();
+    return mimeTypes[ext] || 'application/octet-stream';
+}
+
 var __awaiter$5 = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -117224,12 +117158,30 @@ var __awaiter$5 = (undefined && undefined.__awaiter) || function (thisArg, _argu
 };
 function uploadArtifact(name, files, rootDirectory, options) {
     return __awaiter$5(this, void 0, void 0, function* () {
+        let artifactFileName = `${name}.zip`;
+        if (options === null || options === void 0 ? void 0 : options.skipArchive) {
+            if (files.length === 0) {
+                throw new FilesNotFoundError([]);
+            }
+            if (files.length > 1) {
+                throw new Error('skipArchive option is only supported when uploading a single file');
+            }
+            if (!fs.existsSync(files[0])) {
+                throw new FilesNotFoundError(files);
+            }
+            artifactFileName = path$1.basename(files[0]);
+            name = artifactFileName;
+        }
         validateArtifactName(name);
         validateRootDirectory(rootDirectory);
-        const zipSpecification = getUploadZipSpecification(files, rootDirectory);
-        if (zipSpecification.length === 0) {
-            throw new FilesNotFoundError(zipSpecification.flatMap(s => (s.sourcePath ? [s.sourcePath] : [])));
+        let zipSpecification = [];
+        if (!(options === null || options === void 0 ? void 0 : options.skipArchive)) {
+            zipSpecification = getUploadZipSpecification(files, rootDirectory);
+            if (zipSpecification.length === 0) {
+                throw new FilesNotFoundError(zipSpecification.flatMap(s => (s.sourcePath ? [s.sourcePath] : [])));
+            }
         }
+        const contentType = getMimeType(artifactFileName);
         // get the IDs needed for the artifact creation
         const backendIds = getBackendIdsFromToken();
         // create the artifact client
@@ -117239,7 +117191,8 @@ function uploadArtifact(name, files, rootDirectory, options) {
             workflowRunBackendId: backendIds.workflowRunBackendId,
             workflowJobRunBackendId: backendIds.workflowJobRunBackendId,
             name,
-            version: 4
+            mimeType: StringValue.create({ value: contentType }),
+            version: 7
         };
         // if there is a retention period, add it to the request
         const expiresAt = getExpiration(options === null || options === void 0 ? void 0 : options.retentionDays);
@@ -117250,9 +117203,17 @@ function uploadArtifact(name, files, rootDirectory, options) {
         if (!createArtifactResp.ok) {
             throw new InvalidResponseError('CreateArtifact: response from backend was not ok');
         }
-        const zipUploadStream = yield createZipUploadStream(zipSpecification, options === null || options === void 0 ? void 0 : options.compressionLevel);
-        // Upload zip to blob storage
-        const uploadResult = yield uploadZipToBlobStorage(createArtifactResp.signedUploadUrl, zipUploadStream);
+        let stream;
+        if (options === null || options === void 0 ? void 0 : options.skipArchive) {
+            // Upload raw file without archiving
+            stream = yield createRawFileUploadStream(files[0]);
+        }
+        else {
+            // Create and upload zip archive
+            stream = yield createZipUploadStream(zipSpecification, options === null || options === void 0 ? void 0 : options.compressionLevel);
+        }
+        info(`Uploading artifact: ${artifactFileName}`);
+        const uploadResult = yield uploadToBlobStorage(createArtifactResp.signedUploadUrl, stream, contentType);
         // finalize the artifact
         const finalizeArtifactReq = {
             workflowRunBackendId: backendIds.workflowRunBackendId,
@@ -117271,7 +117232,7 @@ function uploadArtifact(name, files, rootDirectory, options) {
             throw new InvalidResponseError('FinalizeArtifact: response from backend was not ok');
         }
         const artifactId = BigInt(finalizeArtifactResp.artifactId);
-        info(`Artifact ${name}.zip successfully finalized. Artifact ID ${artifactId}`);
+        info(`Artifact ${name} successfully finalized. Artifact ID ${artifactId}`);
         return {
             size: uploadResult.uploadSize,
             digest: uploadResult.sha256Hash,
