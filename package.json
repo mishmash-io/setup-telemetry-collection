@@ -89,6 +89,9 @@
     },
     "@eslint/config-array@0.23.2": {
       "minimatch": "10.2.4"
+    },
+    "eslint": {
+      "minimatch": "10.2.4"
     }
   }
 }
