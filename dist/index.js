@@ -201,6 +201,96 @@ function prepareKeyValueMessage(key, value) {
     return `${key}<<${delimiter}${os.EOL}${convertedValue}${os.EOL}${delimiter}`;
 }
 
+function getProxyUrl(reqUrl) {
+    const usingSsl = reqUrl.protocol === 'https:';
+    if (checkBypass(reqUrl)) {
+        return undefined;
+    }
+    const proxyVar = (() => {
+        if (usingSsl) {
+            return process.env['https_proxy'] || process.env['HTTPS_PROXY'];
+        }
+        else {
+            return process.env['http_proxy'] || process.env['HTTP_PROXY'];
+        }
+    })();
+    if (proxyVar) {
+        try {
+            return new DecodedURL(proxyVar);
+        }
+        catch (_a) {
+            if (!proxyVar.startsWith('http://') && !proxyVar.startsWith('https://'))
+                return new DecodedURL(`http://${proxyVar}`);
+        }
+    }
+    else {
+        return undefined;
+    }
+}
+function checkBypass(reqUrl) {
+    if (!reqUrl.hostname) {
+        return false;
+    }
+    const reqHost = reqUrl.hostname;
+    if (isLoopbackAddress(reqHost)) {
+        return true;
+    }
+    const noProxy = process.env['no_proxy'] || process.env['NO_PROXY'] || '';
+    if (!noProxy) {
+        return false;
+    }
+    // Determine the request port
+    let reqPort;
+    if (reqUrl.port) {
+        reqPort = Number(reqUrl.port);
+    }
+    else if (reqUrl.protocol === 'http:') {
+        reqPort = 80;
+    }
+    else if (reqUrl.protocol === 'https:') {
+        reqPort = 443;
+    }
+    // Format the request hostname and hostname with port
+    const upperReqHosts = [reqUrl.hostname.toUpperCase()];
+    if (typeof reqPort === 'number') {
+        upperReqHosts.push(`${upperReqHosts[0]}:${reqPort}`);
+    }
+    // Compare request host against noproxy
+    for (const upperNoProxyItem of noProxy
+        .split(',')
+        .map(x => x.trim().toUpperCase())
+        .filter(x => x)) {
+        if (upperNoProxyItem === '*' ||
+            upperReqHosts.some(x => x === upperNoProxyItem ||
+                x.endsWith(`.${upperNoProxyItem}`) ||
+                (upperNoProxyItem.startsWith('.') &&
+                    x.endsWith(`${upperNoProxyItem}`)))) {
+            return true;
+        }
+    }
+    return false;
+}
+function isLoopbackAddress(host) {
+    const hostLower = host.toLowerCase();
+    return (hostLower === 'localhost' ||
+        hostLower.startsWith('127.') ||
+        hostLower.startsWith('[::1]') ||
+        hostLower.startsWith('[0:0:0:0:0:0:0:1]'));
+}
+class DecodedURL extends URL {
+    constructor(url, base) {
+        super(url, base);
+        this._decodedUsername = decodeURIComponent(super.username);
+        this._decodedPassword = decodeURIComponent(super.password);
+    }
+    get username() {
+        return this._decodedUsername;
+    }
+    get password() {
+        return this._decodedPassword;
+    }
+}
+
 var commonjsGlobal = typeof globalThis !== 'undefined' ? globalThis : typeof window !== 'undefined' ? window : typeof global !== 'undefined' ? global : typeof self !== 'undefined' ? self : {};
 
 function getDefaultExportFromCjs (x) {
@@ -27828,7 +27918,7 @@ function requireUndici () {
 var undiciExports = requireUndici();
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
-(undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
+var __awaiter$7 = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
         function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
@@ -27837,7 +27927,7 @@ var undiciExports = requireUndici();
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
-var HttpCodes$2;
+var HttpCodes;
 (function (HttpCodes) {
     HttpCodes[HttpCodes["OK"] = 200] = "OK";
     HttpCodes[HttpCodes["MultipleChoices"] = 300] = "MultipleChoices";
@@ -27866,28 +27956,645 @@ var HttpCodes$2;
     HttpCodes[HttpCodes["BadGateway"] = 502] = "BadGateway";
     HttpCodes[HttpCodes["ServiceUnavailable"] = 503] = "ServiceUnavailable";
     HttpCodes[HttpCodes["GatewayTimeout"] = 504] = "GatewayTimeout";
-})(HttpCodes$2 || (HttpCodes$2 = {}));
-var Headers$2;
+})(HttpCodes || (HttpCodes = {}));
+var Headers;
 (function (Headers) {
     Headers["Accept"] = "accept";
     Headers["ContentType"] = "content-type";
-})(Headers$2 || (Headers$2 = {}));
-var MediaTypes$2;
+})(Headers || (Headers = {}));
+var MediaTypes;
 (function (MediaTypes) {
     MediaTypes["ApplicationJson"] = "application/json";
-})(MediaTypes$2 || (MediaTypes$2 = {}));
-[
-    HttpCodes$2.MovedPermanently,
-    HttpCodes$2.ResourceMoved,
-    HttpCodes$2.SeeOther,
-    HttpCodes$2.TemporaryRedirect,
-    HttpCodes$2.PermanentRedirect
+})(MediaTypes || (MediaTypes = {}));
+const HttpRedirectCodes = [
+    HttpCodes.MovedPermanently,
+    HttpCodes.ResourceMoved,
+    HttpCodes.SeeOther,
+    HttpCodes.TemporaryRedirect,
+    HttpCodes.PermanentRedirect
 ];
-[
-    HttpCodes$2.BadGateway,
-    HttpCodes$2.ServiceUnavailable,
-    HttpCodes$2.GatewayTimeout
+const HttpResponseRetryCodes = [
+    HttpCodes.BadGateway,
+    HttpCodes.ServiceUnavailable,
+    HttpCodes.GatewayTimeout
 ];
+const RetryableHttpVerbs = ['OPTIONS', 'GET', 'DELETE', 'HEAD'];
+const ExponentialBackoffCeiling = 10;
+const ExponentialBackoffTimeSlice = 5;
+class HttpClientError extends Error {
+    constructor(message, statusCode) {
+        super(message);
+        this.name = 'HttpClientError';
+        this.statusCode = statusCode;
+        Object.setPrototypeOf(this, HttpClientError.prototype);
+    }
+}
+class HttpClientResponse {
+    constructor(message) {
+        this.message = message;
+    }
+    readBody() {
+        return __awaiter$7(this, void 0, void 0, function* () {
+            return new Promise((resolve) => __awaiter$7(this, void 0, void 0, function* () {
+                let output = Buffer.alloc(0);
+                this.message.on('data', (chunk) => {
+                    output = Buffer.concat([output, chunk]);
+                });
+                this.message.on('end', () => {
+                    resolve(output.toString());
+                });
+            }));
+        });
+    }
+    readBodyBuffer() {
+        return __awaiter$7(this, void 0, void 0, function* () {
+            return new Promise((resolve) => __awaiter$7(this, void 0, void 0, function* () {
+                const chunks = [];
+                this.message.on('data', (chunk) => {
+                    chunks.push(chunk);
+                });
+                this.message.on('end', () => {
+                    resolve(Buffer.concat(chunks));
+                });
+            }));
+        });
+    }
+}
+class HttpClient {
+    constructor(userAgent, handlers, requestOptions) {
+        this._ignoreSslError = false;
+        this._allowRedirects = true;
+        this._allowRedirectDowngrade = false;
+        this._maxRedirects = 50;
+        this._allowRetries = false;
+        this._maxRetries = 1;
+        this._keepAlive = false;
+        this._disposed = false;
+        this.userAgent = this._getUserAgentWithOrchestrationId(userAgent);
+        this.handlers = handlers || [];
+        this.requestOptions = requestOptions;
+        if (requestOptions) {
+            if (requestOptions.ignoreSslError != null) {
+                this._ignoreSslError = requestOptions.ignoreSslError;
+            }
+            this._socketTimeout = requestOptions.socketTimeout;
+            if (requestOptions.allowRedirects != null) {
+                this._allowRedirects = requestOptions.allowRedirects;
+            }
+            if (requestOptions.allowRedirectDowngrade != null) {
+                this._allowRedirectDowngrade = requestOptions.allowRedirectDowngrade;
+            }
+            if (requestOptions.maxRedirects != null) {
+                this._maxRedirects = Math.max(requestOptions.maxRedirects, 0);
+            }
+            if (requestOptions.keepAlive != null) {
+                this._keepAlive = requestOptions.keepAlive;
+            }
+            if (requestOptions.allowRetries != null) {
+                this._allowRetries = requestOptions.allowRetries;
+            }
+            if (requestOptions.maxRetries != null) {
+                this._maxRetries = requestOptions.maxRetries;
+            }
+        }
+    }
+    options(requestUrl, additionalHeaders) {
+        return __awaiter$7(this, void 0, void 0, function* () {
+            return this.request('OPTIONS', requestUrl, null, additionalHeaders || {});
+        });
+    }
+    get(requestUrl, additionalHeaders) {
+        return __awaiter$7(this, void 0, void 0, function* () {
+            return this.request('GET', requestUrl, null, additionalHeaders || {});
+        });
+    }
+    del(requestUrl, additionalHeaders) {
+        return __awaiter$7(this, void 0, void 0, function* () {
+            return this.request('DELETE', requestUrl, null, additionalHeaders || {});
+        });
+    }
+    post(requestUrl, data, additionalHeaders) {
+        return __awaiter$7(this, void 0, void 0, function* () {
+            return this.request('POST', requestUrl, data, additionalHeaders || {});
+        });
+    }
+    patch(requestUrl, data, additionalHeaders) {
+        return __awaiter$7(this, void 0, void 0, function* () {
+            return this.request('PATCH', requestUrl, data, additionalHeaders || {});
+        });
+    }
+    put(requestUrl, data, additionalHeaders) {
+        return __awaiter$7(this, void 0, void 0, function* () {
+            return this.request('PUT', requestUrl, data, additionalHeaders || {});
+        });
+    }
+    head(requestUrl, additionalHeaders) {
+        return __awaiter$7(this, void 0, void 0, function* () {
+            return this.request('HEAD', requestUrl, null, additionalHeaders || {});
+        });
+    }
+    sendStream(verb, requestUrl, stream, additionalHeaders) {
+        return __awaiter$7(this, void 0, void 0, function* () {
+            return this.request(verb, requestUrl, stream, additionalHeaders);
+        });
+    }
+    /**
+     * Gets a typed object from an endpoint
+     * Be aware that not found returns a null.  Other errors (4xx, 5xx) reject the promise
+     */
+    getJson(requestUrl_1) {
+        return __awaiter$7(this, arguments, void 0, function* (requestUrl, additionalHeaders = {}) {
+            additionalHeaders[Headers.Accept] = this._getExistingOrDefaultHeader(additionalHeaders, Headers.Accept, MediaTypes.ApplicationJson);
+            const res = yield this.get(requestUrl, additionalHeaders);
+            return this._processResponse(res, this.requestOptions);
+        });
+    }
+    postJson(requestUrl_1, obj_1) {
+        return __awaiter$7(this, arguments, void 0, function* (requestUrl, obj, additionalHeaders = {}) {
+            const data = JSON.stringify(obj, null, 2);
+            additionalHeaders[Headers.Accept] = this._getExistingOrDefaultHeader(additionalHeaders, Headers.Accept, MediaTypes.ApplicationJson);
+            additionalHeaders[Headers.ContentType] =
+                this._getExistingOrDefaultContentTypeHeader(additionalHeaders, MediaTypes.ApplicationJson);
+            const res = yield this.post(requestUrl, data, additionalHeaders);
+            return this._processResponse(res, this.requestOptions);
+        });
+    }
+    putJson(requestUrl_1, obj_1) {
+        return __awaiter$7(this, arguments, void 0, function* (requestUrl, obj, additionalHeaders = {}) {
+            const data = JSON.stringify(obj, null, 2);
+            additionalHeaders[Headers.Accept] = this._getExistingOrDefaultHeader(additionalHeaders, Headers.Accept, MediaTypes.ApplicationJson);
+            additionalHeaders[Headers.ContentType] =
+                this._getExistingOrDefaultContentTypeHeader(additionalHeaders, MediaTypes.ApplicationJson);
+            const res = yield this.put(requestUrl, data, additionalHeaders);
+            return this._processResponse(res, this.requestOptions);
+        });
+    }
+    patchJson(requestUrl_1, obj_1) {
+        return __awaiter$7(this, arguments, void 0, function* (requestUrl, obj, additionalHeaders = {}) {
+            const data = JSON.stringify(obj, null, 2);
+            additionalHeaders[Headers.Accept] = this._getExistingOrDefaultHeader(additionalHeaders, Headers.Accept, MediaTypes.ApplicationJson);
+            additionalHeaders[Headers.ContentType] =
+                this._getExistingOrDefaultContentTypeHeader(additionalHeaders, MediaTypes.ApplicationJson);
+            const res = yield this.patch(requestUrl, data, additionalHeaders);
+            return this._processResponse(res, this.requestOptions);
+        });
+    }
+    /**
+     * Makes a raw http request.
+     * All other methods such as get, post, patch, and request ultimately call this.
+     * Prefer get, del, post and patch
+     */
+    request(verb, requestUrl, data, headers) {
+        return __awaiter$7(this, void 0, void 0, function* () {
+            if (this._disposed) {
+                throw new Error('Client has already been disposed.');
+            }
+            const parsedUrl = new URL(requestUrl);
+            let info = this._prepareRequest(verb, parsedUrl, headers);
+            // Only perform retries on reads since writes may not be idempotent.
+            const maxTries = this._allowRetries && RetryableHttpVerbs.includes(verb)
+                ? this._maxRetries + 1
+                : 1;
+            let numTries = 0;
+            let response;
+            do {
+                response = yield this.requestRaw(info, data);
+                // Check if it's an authentication challenge
+                if (response &&
+                    response.message &&
+                    response.message.statusCode === HttpCodes.Unauthorized) {
+                    let authenticationHandler;
+                    for (const handler of this.handlers) {
+                        if (handler.canHandleAuthentication(response)) {
+                            authenticationHandler = handler;
+                            break;
+                        }
+                    }
+                    if (authenticationHandler) {
+                        return authenticationHandler.handleAuthentication(this, info, data);
+                    }
+                    else {
+                        // We have received an unauthorized response but have no handlers to handle it.
+                        // Let the response return to the caller.
+                        return response;
+                    }
+                }
+                let redirectsRemaining = this._maxRedirects;
+                while (response.message.statusCode &&
+                    HttpRedirectCodes.includes(response.message.statusCode) &&
+                    this._allowRedirects &&
+                    redirectsRemaining > 0) {
+                    const redirectUrl = response.message.headers['location'];
+                    if (!redirectUrl) {
+                        // if there's no location to redirect to, we won't
+                        break;
+                    }
+                    const parsedRedirectUrl = new URL(redirectUrl);
+                    if (parsedUrl.protocol === 'https:' &&
+                        parsedUrl.protocol !== parsedRedirectUrl.protocol &&
+                        !this._allowRedirectDowngrade) {
+                        throw new Error('Redirect from HTTPS to HTTP protocol. This downgrade is not allowed for security reasons. If you want to allow this behavior, set the allowRedirectDowngrade option to true.');
+                    }
+                    // we need to finish reading the response before reassigning response
+                    // which will leak the open socket.
+                    yield response.readBody();
+                    // strip authorization header if redirected to a different hostname
+                    if (parsedRedirectUrl.hostname !== parsedUrl.hostname) {
+                        for (const header in headers) {
+                            // header names are case insensitive
+                            if (header.toLowerCase() === 'authorization') {
+                                delete headers[header];
+                            }
+                        }
+                    }
+                    // let's make the request with the new redirectUrl
+                    info = this._prepareRequest(verb, parsedRedirectUrl, headers);
+                    response = yield this.requestRaw(info, data);
+                    redirectsRemaining--;
+                }
+                if (!response.message.statusCode ||
+                    !HttpResponseRetryCodes.includes(response.message.statusCode)) {
+                    // If not a retry code, return immediately instead of retrying
+                    return response;
+                }
+                numTries += 1;
+                if (numTries < maxTries) {
+                    yield response.readBody();
+                    yield this._performExponentialBackoff(numTries);
+                }
+            } while (numTries < maxTries);
+            return response;
+        });
+    }
+    /**
+     * Needs to be called if keepAlive is set to true in request options.
+     */
+    dispose() {
+        if (this._agent) {
+            this._agent.destroy();
+        }
+        this._disposed = true;
+    }
+    /**
+     * Raw request.
+     * @param info
+     * @param data
+     */
+    requestRaw(info, data) {
+        return __awaiter$7(this, void 0, void 0, function* () {
+            return new Promise((resolve, reject) => {
+                function callbackForResult(err, res) {
+                    if (err) {
+                        reject(err);
+                    }
+                    else if (!res) {
+                        // If `err` is not passed, then `res` must be passed.
+                        reject(new Error('Unknown error'));
+                    }
+                    else {
+                        resolve(res);
+                    }
+                }
+                this.requestRawWithCallback(info, data, callbackForResult);
+            });
+        });
+    }
+    /**
+     * Raw request with callback.
+     * @param info
+     * @param data
+     * @param onResult
+     */
+    requestRawWithCallback(info, data, onResult) {
+        if (typeof data === 'string') {
+            if (!info.options.headers) {
+                info.options.headers = {};
+            }
+            info.options.headers['Content-Length'] = Buffer.byteLength(data, 'utf8');
+        }
+        let callbackCalled = false;
+        function handleResult(err, res) {
+            if (!callbackCalled) {
+                callbackCalled = true;
+                onResult(err, res);
+            }
+        }
+        const req = info.httpModule.request(info.options, (msg) => {
+            const res = new HttpClientResponse(msg);
+            handleResult(undefined, res);
+        });
+        let socket;
+        req.on('socket', sock => {
+            socket = sock;
+        });
+        // If we ever get disconnected, we want the socket to timeout eventually
+        req.setTimeout(this._socketTimeout || 3 * 60000, () => {
+            if (socket) {
+                socket.end();
+            }
+            handleResult(new Error(`Request timeout: ${info.options.path}`));
+        });
+        req.on('error', function (err) {
+            // err has statusCode property
+            // res should have headers
+            handleResult(err);
+        });
+        if (data && typeof data === 'string') {
+            req.write(data, 'utf8');
+        }
+        if (data && typeof data !== 'string') {
+            data.on('close', function () {
+                req.end();
+            });
+            data.pipe(req);
+        }
+        else {
+            req.end();
+        }
+    }
+    /**
+     * Gets an http agent. This function is useful when you need an http agent that handles
+     * routing through a proxy server - depending upon the url and proxy environment variables.
+     * @param serverUrl  The server URL where the request will be sent. For example, https://api.github.com
+     */
+    getAgent(serverUrl) {
+        const parsedUrl = new URL(serverUrl);
+        return this._getAgent(parsedUrl);
+    }
+    getAgentDispatcher(serverUrl) {
+        const parsedUrl = new URL(serverUrl);
+        const proxyUrl = getProxyUrl(parsedUrl);
+        const useProxy = proxyUrl && proxyUrl.hostname;
+        if (!useProxy) {
+            return;
+        }
+        return this._getProxyAgentDispatcher(parsedUrl, proxyUrl);
+    }
+    _prepareRequest(method, requestUrl, headers) {
+        const info = {};
+        info.parsedUrl = requestUrl;
+        const usingSsl = info.parsedUrl.protocol === 'https:';
+        info.httpModule = usingSsl ? https : http;
+        const defaultPort = usingSsl ? 443 : 80;
+        info.options = {};
+        info.options.host = info.parsedUrl.hostname;
+        info.options.port = info.parsedUrl.port
+            ? parseInt(info.parsedUrl.port)
+            : defaultPort;
+        info.options.path =
+            (info.parsedUrl.pathname || '') + (info.parsedUrl.search || '');
+        info.options.method = method;
+        info.options.headers = this._mergeHeaders(headers);
+        if (this.userAgent != null) {
+            info.options.headers['user-agent'] = this.userAgent;
+        }
+        info.options.agent = this._getAgent(info.parsedUrl);
+        // gives handlers an opportunity to participate
+        if (this.handlers) {
+            for (const handler of this.handlers) {
+                handler.prepareRequest(info.options);
+            }
+        }
+        return info;
+    }
+    _mergeHeaders(headers) {
+        if (this.requestOptions && this.requestOptions.headers) {
+            return Object.assign({}, lowercaseKeys$1(this.requestOptions.headers), lowercaseKeys$1(headers || {}));
+        }
+        return lowercaseKeys$1(headers || {});
+    }
+    /**
+     * Gets an existing header value or returns a default.
+     * Handles converting number header values to strings since HTTP headers must be strings.
+     * Note: This returns string | string[] since some headers can have multiple values.
+     * For headers that must always be a single string (like Content-Type), use the
+     * specialized _getExistingOrDefaultContentTypeHeader method instead.
+     */
+    _getExistingOrDefaultHeader(additionalHeaders, header, _default) {
+        let clientHeader;
+        if (this.requestOptions && this.requestOptions.headers) {
+            const headerValue = lowercaseKeys$1(this.requestOptions.headers)[header];
+            if (headerValue) {
+                clientHeader =
+                    typeof headerValue === 'number' ? headerValue.toString() : headerValue;
+            }
+        }
+        const additionalValue = additionalHeaders[header];
+        if (additionalValue !== undefined) {
+            return typeof additionalValue === 'number'
+                ? additionalValue.toString()
+                : additionalValue;
+        }
+        if (clientHeader !== undefined) {
+            return clientHeader;
+        }
+        return _default;
+    }
+    /**
+     * Specialized version of _getExistingOrDefaultHeader for Content-Type header.
+     * Always returns a single string (not an array) since Content-Type should be a single value.
+     * Converts arrays to comma-separated strings and numbers to strings to ensure type safety.
+     * This was split from _getExistingOrDefaultHeader to provide stricter typing for callers
+     * that assign the result to places expecting a string (e.g., additionalHeaders[Headers.ContentType]).
+     */
+    _getExistingOrDefaultContentTypeHeader(additionalHeaders, _default) {
+        let clientHeader;
+        if (this.requestOptions && this.requestOptions.headers) {
+            const headerValue = lowercaseKeys$1(this.requestOptions.headers)[Headers.ContentType];
+            if (headerValue) {
+                if (typeof headerValue === 'number') {
+                    clientHeader = String(headerValue);
+                }
+                else if (Array.isArray(headerValue)) {
+                    clientHeader = headerValue.join(', ');
+                }
+                else {
+                    clientHeader = headerValue;
+                }
+            }
+        }
+        const additionalValue = additionalHeaders[Headers.ContentType];
+        // Return the first non-undefined value, converting numbers or arrays to strings if necessary
+        if (additionalValue !== undefined) {
+            if (typeof additionalValue === 'number') {
+                return String(additionalValue);
+            }
+            else if (Array.isArray(additionalValue)) {
+                return additionalValue.join(', ');
+            }
+            else {
+                return additionalValue;
+            }
+        }
+        if (clientHeader !== undefined) {
+            return clientHeader;
+        }
+        return _default;
+    }
+    _getAgent(parsedUrl) {
+        let agent;
+        const proxyUrl = getProxyUrl(parsedUrl);
+        const useProxy = proxyUrl && proxyUrl.hostname;
+        if (this._keepAlive && useProxy) {
+            agent = this._proxyAgent;
+        }
+        if (!useProxy) {
+            agent = this._agent;
+        }
+        // if agent is already assigned use that agent.
+        if (agent) {
+            return agent;
+        }
+        const usingSsl = parsedUrl.protocol === 'https:';
+        let maxSockets = 100;
+        if (this.requestOptions) {
+            maxSockets = this.requestOptions.maxSockets || http.globalAgent.maxSockets;
+        }
+        // This is `useProxy` again, but we need to check `proxyURl` directly for TypeScripts's flow analysis.
+        if (proxyUrl && proxyUrl.hostname) {
+            const agentOptions = {
+                maxSockets,
+                keepAlive: this._keepAlive,
+                proxy: Object.assign(Object.assign({}, ((proxyUrl.username || proxyUrl.password) && {
+                    proxyAuth: `${proxyUrl.username}:${proxyUrl.password}`
+                })), { host: proxyUrl.hostname, port: proxyUrl.port })
+            };
+            let tunnelAgent;
+            const overHttps = proxyUrl.protocol === 'https:';
+            if (usingSsl) {
+                tunnelAgent = overHttps ? tunnelExports.httpsOverHttps : tunnelExports.httpsOverHttp;
+            }
+            else {
+                tunnelAgent = overHttps ? tunnelExports.httpOverHttps : tunnelExports.httpOverHttp;
+            }
+            agent = tunnelAgent(agentOptions);
+            this._proxyAgent = agent;
+        }
+        // if tunneling agent isn't assigned create a new agent
+        if (!agent) {
+            const options = { keepAlive: this._keepAlive, maxSockets };
+            agent = usingSsl ? new https.Agent(options) : new http.Agent(options);
+            this._agent = agent;
+        }
+        if (usingSsl && this._ignoreSslError) {
+            // we don't want to set NODE_TLS_REJECT_UNAUTHORIZED=0 since that will affect request for entire process
+            // http.RequestOptions doesn't expose a way to modify RequestOptions.agent.options
+            // we have to cast it to any and change it directly
+            agent.options = Object.assign(agent.options || {}, {
+                rejectUnauthorized: false
+            });
+        }
+        return agent;
+    }
+    _getProxyAgentDispatcher(parsedUrl, proxyUrl) {
+        let proxyAgent;
+        if (this._keepAlive) {
+            proxyAgent = this._proxyAgentDispatcher;
+        }
+        // if agent is already assigned use that agent.
+        if (proxyAgent) {
+            return proxyAgent;
+        }
+        const usingSsl = parsedUrl.protocol === 'https:';
+        proxyAgent = new undiciExports.ProxyAgent(Object.assign({ uri: proxyUrl.href, pipelining: !this._keepAlive ? 0 : 1 }, ((proxyUrl.username || proxyUrl.password) && {
+            token: `Basic ${Buffer.from(`${proxyUrl.username}:${proxyUrl.password}`).toString('base64')}`
+        })));
+        this._proxyAgentDispatcher = proxyAgent;
+        if (usingSsl && this._ignoreSslError) {
+            // we don't want to set NODE_TLS_REJECT_UNAUTHORIZED=0 since that will affect request for entire process
+            // http.RequestOptions doesn't expose a way to modify RequestOptions.agent.options
+            // we have to cast it to any and change it directly
+            proxyAgent.options = Object.assign(proxyAgent.options.requestTls || {}, {
+                rejectUnauthorized: false
+            });
+        }
+        return proxyAgent;
+    }
+    _getUserAgentWithOrchestrationId(userAgent) {
+        const baseUserAgent = userAgent || 'actions/http-client';
+        const orchId = process.env['ACTIONS_ORCHESTRATION_ID'];
+        if (orchId) {
+            // Sanitize the orchestration ID to ensure it contains only valid characters
+            // Valid characters: 0-9, a-z, _, -, .
+            const sanitizedId = orchId.replace(/[^a-z0-9_.-]/gi, '_');
+            return `${baseUserAgent} actions_orchestration_id/${sanitizedId}`;
+        }
+        return baseUserAgent;
+    }
+    _performExponentialBackoff(retryNumber) {
+        return __awaiter$7(this, void 0, void 0, function* () {
+            retryNumber = Math.min(ExponentialBackoffCeiling, retryNumber);
+            const ms = ExponentialBackoffTimeSlice * Math.pow(2, retryNumber);
+            return new Promise(resolve => setTimeout(() => resolve(), ms));
+        });
+    }
+    _processResponse(res, options) {
+        return __awaiter$7(this, void 0, void 0, function* () {
+            return new Promise((resolve, reject) => __awaiter$7(this, void 0, void 0, function* () {
+                const statusCode = res.message.statusCode || 0;
+                const response = {
+                    statusCode,
+                    result: null,
+                    headers: {}
+                };
+                // not found leads to null obj returned
+                if (statusCode === HttpCodes.NotFound) {
+                    resolve(response);
+                }
+                // get the result from the body
+                function dateTimeDeserializer(key, value) {
+                    if (typeof value === 'string') {
+                        const a = new Date(value);
+                        if (!isNaN(a.valueOf())) {
+                            return a;
+                        }
+                    }
+                    return value;
+                }
+                let obj;
+                let contents;
+                try {
+                    contents = yield res.readBody();
+                    if (contents && contents.length > 0) {
+                        if (options && options.deserializeDates) {
+                            obj = JSON.parse(contents, dateTimeDeserializer);
+                        }
+                        else {
+                            obj = JSON.parse(contents);
+                        }
+                        response.result = obj;
+                    }
+                    response.headers = res.message.headers;
+                }
+                catch (err) {
+                    // Invalid resource (contents not json);  leaving result obj null
+                }
+                // note that 3xx redirects are handled by the http layer.
+                if (statusCode > 299) {
+                    let msg;
+                    // if exception/error in body, attempt to get better error
+                    if (obj && obj.message) {
+                        msg = obj.message;
+                    }
+                    else if (contents && contents.length > 0) {
+                        // it may be the case that the exception is in the body message as string
+                        msg = contents;
+                    }
+                    else {
+                        msg = `Failed request: (${statusCode})`;
+                    }
+                    const err = new HttpClientError(msg, statusCode);
+                    err.result = response.result;
+                    reject(err);
+                }
+                else {
+                    resolve(response);
+                }
+            }));
+        });
+    }
+}
+const lowercaseKeys$1 = (obj) => Object.keys(obj).reduce((c, k) => ((c[k.toLowerCase()] = obj[k]), c), {});
 
 (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
@@ -27932,7 +28639,7 @@ function toPlatformPath(pth) {
     return pth.replace(/[/\\]/g, path$1.sep);
 }
 
-var __awaiter$9 = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
+var __awaiter$6 = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
         function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
@@ -27941,14 +28648,36 @@ var __awaiter$9 = (undefined && undefined.__awaiter) || function (thisArg, _argu
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
-const { chmod: chmod$1, copyFile: copyFile$2, lstat: lstat$1, mkdir: mkdir$1, open: open$1, readdir: readdir$1, rename: rename$1, rm: rm$1, rmdir: rmdir$1, stat: stat$1, symlink: symlink$1, unlink: unlink$1 } = fs.promises;
+const { chmod, copyFile: copyFile$1, lstat, mkdir, open, readdir, rename, rm, rmdir, stat, symlink, unlink } = fs.promises;
 // export const {open} = 'fs'
-const IS_WINDOWS$3 = process.platform === 'win32';
+const IS_WINDOWS$2 = process.platform === 'win32';
+/**
+ * Custom implementation of readlink to ensure Windows junctions
+ * maintain trailing backslash for backward compatibility with Node.js < 24
+ *
+ * In Node.js 20, Windows junctions (directory symlinks) always returned paths
+ * with trailing backslashes. Node.js 24 removed this behavior, which breaks
+ * code that relied on this format for path operations.
+ *
+ * This implementation restores the Node 20 behavior by adding a trailing
+ * backslash to all junction results on Windows.
+ */
+function readlink(fsPath) {
+    return __awaiter$6(this, void 0, void 0, function* () {
+        const result = yield fs.promises.readlink(fsPath);
+        // On Windows, restore Node 20 behavior: add trailing backslash to all results
+        // since junctions on Windows are always directory links
+        if (IS_WINDOWS$2 && !result.endsWith('\\')) {
+            return `${result}\\`;
+        }
+        return result;
+    });
+}
 fs.constants.O_RDONLY;
-function exists$1(fsPath) {
-    return __awaiter$9(this, void 0, void 0, function* () {
+function exists(fsPath) {
+    return __awaiter$6(this, void 0, void 0, function* () {
         try {
-            yield stat$1(fsPath);
+            yield stat(fsPath);
         }
         catch (err) {
             if (err.code === 'ENOENT') {
@@ -27963,12 +28692,12 @@ function exists$1(fsPath) {
  * On OSX/Linux, true if path starts with '/'. On Windows, true for paths like:
  * \, \hello, \\hello\share, C:, and C:\hello (and corresponding alternate separator cases).
  */
-function isRooted$1(p) {
-    p = normalizeSeparators$1(p);
+function isRooted(p) {
+    p = normalizeSeparators(p);
     if (!p) {
         throw new Error('isRooted() parameter "p" cannot be empty');
     }
-    if (IS_WINDOWS$3) {
+    if (IS_WINDOWS$2) {
         return (p.startsWith('\\') || /^[A-Z]:/i.test(p) // e.g. \ or \hello or \\hello
         ); // e.g. C: or C:\hello
     }
@@ -27980,12 +28709,12 @@ function isRooted$1(p) {
  * @param extensions  additional file extensions to try
  * @return if file exists and is executable, returns the file path. otherwise empty string.
  */
-function tryGetExecutablePath$1(filePath, extensions) {
-    return __awaiter$9(this, void 0, void 0, function* () {
+function tryGetExecutablePath(filePath, extensions) {
+    return __awaiter$6(this, void 0, void 0, function* () {
         let stats = undefined;
         try {
             // test file exists
-            stats = yield stat$1(filePath);
+            stats = yield stat(filePath);
         }
         catch (err) {
             if (err.code !== 'ENOENT') {
@@ -27994,7 +28723,7 @@ function tryGetExecutablePath$1(filePath, extensions) {
             }
         }
         if (stats && stats.isFile()) {
-            if (IS_WINDOWS$3) {
+            if (IS_WINDOWS$2) {
                 // on Windows, test for valid extension
                 const upperExt = path$1.extname(filePath).toUpperCase();
                 if (extensions.some(validExt => validExt.toUpperCase() === upperExt)) {
@@ -28002,7 +28731,7 @@ function tryGetExecutablePath$1(filePath, extensions) {
                 }
             }
             else {
-                if (isUnixExecutable$1(stats)) {
+                if (isUnixExecutable(stats)) {
                     return filePath;
                 }
             }
@@ -28013,7 +28742,7 @@ function tryGetExecutablePath$1(filePath, extensions) {
             filePath = originalFilePath + extension;
             stats = undefined;
             try {
-                stats = yield stat$1(filePath);
+                stats = yield stat(filePath);
             }
             catch (err) {
                 if (err.code !== 'ENOENT') {
@@ -28022,12 +28751,12 @@ function tryGetExecutablePath$1(filePath, extensions) {
                 }
             }
             if (stats && stats.isFile()) {
-                if (IS_WINDOWS$3) {
+                if (IS_WINDOWS$2) {
                     // preserve the case of the actual file (since an extension was appended)
                     try {
                         const directory = path$1.dirname(filePath);
                         const upperName = path$1.basename(filePath).toUpperCase();
-                        for (const actualName of yield readdir$1(directory)) {
+                        for (const actualName of yield readdir(directory)) {
                             if (upperName === actualName.toUpperCase()) {
                                 filePath = path$1.join(directory, actualName);
                                 break;
@@ -28041,7 +28770,7 @@ function tryGetExecutablePath$1(filePath, extensions) {
                     return filePath;
                 }
                 else {
-                    if (isUnixExecutable$1(stats)) {
+                    if (isUnixExecutable(stats)) {
                         return filePath;
                     }
                 }
@@ -28050,9 +28779,9 @@ function tryGetExecutablePath$1(filePath, extensions) {
         return '';
     });
 }
-function normalizeSeparators$1(p) {
+function normalizeSeparators(p) {
     p = p || '';
-    if (IS_WINDOWS$3) {
+    if (IS_WINDOWS$2) {
         // convert slashes on Windows
         p = p.replace(/\//g, '\\');
         // remove redundant slashes
@@ -28064,7 +28793,7 @@ function normalizeSeparators$1(p) {
 // on Mac/Linux, test the execute bit
 //     R   W  X  R  W X R W X
 //   256 128 64 32 16 8 4 2 1
-function isUnixExecutable$1(stats) {
+function isUnixExecutable(stats) {
     return ((stats.mode & 1) > 0 ||
         ((stats.mode & 8) > 0 &&
             process.getgid !== undefined &&
@@ -28074,7 +28803,7 @@ function isUnixExecutable$1(stats) {
             stats.uid === process.getuid()));
 }
 
-var __awaiter$8 = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
+var __awaiter$5 = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
         function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
@@ -28084,6 +28813,88 @@ var __awaiter$8 = (undefined && undefined.__awaiter) || function (thisArg, _argu
     });
 };
 /**
+ * Copies a file or folder.
+ * Based off of shelljs - https://github.com/shelljs/shelljs/blob/9237f66c52e5daa40458f94f9565e18e8132f5a6/src/cp.js
+ *
+ * @param     source    source path
+ * @param     dest      destination path
+ * @param     options   optional. See CopyOptions.
+ */
+function cp(source_1, dest_1) {
+    return __awaiter$5(this, arguments, void 0, function* (source, dest, options = {}) {
+        const { force, recursive, copySourceDirectory } = readCopyOptions(options);
+        const destStat = (yield exists(dest)) ? yield stat(dest) : null;
+        // Dest is an existing file, but not forcing
+        if (destStat && destStat.isFile() && !force) {
+            return;
+        }
+        // If dest is an existing directory, should copy inside.
+        const newDest = destStat && destStat.isDirectory() && copySourceDirectory
+            ? path$1.join(dest, path$1.basename(source))
+            : dest;
+        if (!(yield exists(source))) {
+            throw new Error(`no such file or directory: ${source}`);
+        }
+        const sourceStat = yield stat(source);
+        if (sourceStat.isDirectory()) {
+            if (!recursive) {
+                throw new Error(`Failed to copy. ${source} is a directory, but tried to copy without recursive flag.`);
+            }
+            else {
+                yield cpDirRecursive(source, newDest, 0, force);
+            }
+        }
+        else {
+            if (path$1.relative(source, newDest) === '') {
+                // a file cannot be copied to itself
+                throw new Error(`'${newDest}' and '${source}' are the same file`);
+            }
+            yield copyFile(source, newDest, force);
+        }
+    });
+}
+/**
+ * Remove a path recursively with force
+ *
+ * @param inputPath path to remove
+ */
+function rmRF(inputPath) {
+    return __awaiter$5(this, void 0, void 0, function* () {
+        if (IS_WINDOWS$2) {
+            // Check for invalid characters
+            // https://docs.microsoft.com/en-us/windows/win32/fileio/naming-a-file
+            if (/[*"<>|]/.test(inputPath)) {
+                throw new Error('File path must not contain `*`, `"`, `<`, `>` or `|` on Windows');
+            }
+        }
+        try {
+            // note if path does not exist, error is silent
+            yield rm(inputPath, {
+                force: true,
+                maxRetries: 3,
+                recursive: true,
+                retryDelay: 300
+            });
+        }
+        catch (err) {
+            throw new Error(`File was unable to be removed ${err}`);
+        }
+    });
+}
+/**
+ * Make a directory.  Creates the full path with folders in between
+ * Will throw if it fails
+ *
+ * @param   fsPath        path to create
+ * @returns Promise<void>
+ */
+function mkdirP(fsPath) {
+    return __awaiter$5(this, void 0, void 0, function* () {
+        ok(fsPath, 'a path argument must be provided');
+        yield mkdir(fsPath, { recursive: true });
+    });
+}
+/**
  * Returns path of a tool had the tool actually been invoked.  Resolves via paths.
  * If you check and the tool does not exist, it will throw.
  *
@@ -28091,16 +28902,16 @@ var __awaiter$8 = (undefined && undefined.__awaiter) || function (thisArg, _argu
  * @param     check             whether to check if tool exists
  * @returns   Promise<string>   path to tool
  */
-function which$1(tool, check) {
-    return __awaiter$8(this, void 0, void 0, function* () {
+function which(tool, check) {
+    return __awaiter$5(this, void 0, void 0, function* () {
         if (!tool) {
             throw new Error("parameter 'tool' is required");
         }
         // recursive when check=true
         if (check) {
-            const result = yield which$1(tool, false);
+            const result = yield which(tool, false);
             if (!result) {
-                if (IS_WINDOWS$3) {
+                if (IS_WINDOWS$2) {
                     throw new Error(`Unable to locate executable file: ${tool}. Please verify either the file path exists or the file can be found within a directory specified by the PATH environment variable. Also verify the file has a valid extension for an executable file.`);
                 }
                 else {
@@ -28109,7 +28920,7 @@ function which$1(tool, check) {
             }
             return result;
         }
-        const matches = yield findInPath$1(tool);
+        const matches = yield findInPath(tool);
         if (matches && matches.length > 0) {
             return matches[0];
         }
@@ -28121,14 +28932,14 @@ function which$1(tool, check) {
  *
  * @returns   Promise<string[]>  the paths of the tool
  */
-function findInPath$1(tool) {
-    return __awaiter$8(this, void 0, void 0, function* () {
+function findInPath(tool) {
+    return __awaiter$5(this, void 0, void 0, function* () {
         if (!tool) {
             throw new Error("parameter 'tool' is required");
         }
         // build the list of extensions to try
         const extensions = [];
-        if (IS_WINDOWS$3 && process.env['PATHEXT']) {
+        if (IS_WINDOWS$2 && process.env['PATHEXT']) {
             for (const extension of process.env['PATHEXT'].split(path$1.delimiter)) {
                 if (extension) {
                     extensions.push(extension);
@@ -28136,8 +28947,8 @@ function findInPath$1(tool) {
             }
         }
         // if it's rooted, return it if exists. otherwise return empty.
-        if (isRooted$1(tool)) {
-            const filePath = yield tryGetExecutablePath$1(tool, extensions);
+        if (isRooted(tool)) {
+            const filePath = yield tryGetExecutablePath(tool, extensions);
             if (filePath) {
                 return [filePath];
             }
@@ -28164,7 +28975,7 @@ function findInPath$1(tool) {
         // find all matches
         const matches = [];
         for (const directory of directories) {
-            const filePath = yield tryGetExecutablePath$1(path$1.join(directory, tool), extensions);
+            const filePath = yield tryGetExecutablePath(path$1.join(directory, tool), extensions);
             if (filePath) {
                 matches.push(filePath);
             }
@@ -28172,8 +28983,66 @@ function findInPath$1(tool) {
         return matches;
     });
 }
+function readCopyOptions(options) {
+    const force = options.force == null ? true : options.force;
+    const recursive = Boolean(options.recursive);
+    const copySourceDirectory = options.copySourceDirectory == null
+        ? true
+        : Boolean(options.copySourceDirectory);
+    return { force, recursive, copySourceDirectory };
+}
+function cpDirRecursive(sourceDir, destDir, currentDepth, force) {
+    return __awaiter$5(this, void 0, void 0, function* () {
+        // Ensure there is not a run away recursive copy
+        if (currentDepth >= 255)
+            return;
+        currentDepth++;
+        yield mkdirP(destDir);
+        const files = yield readdir(sourceDir);
+        for (const fileName of files) {
+            const srcFile = `${sourceDir}/${fileName}`;
+            const destFile = `${destDir}/${fileName}`;
+            const srcFileStat = yield lstat(srcFile);
+            if (srcFileStat.isDirectory()) {
+                // Recurse
+                yield cpDirRecursive(srcFile, destFile, currentDepth, force);
+            }
+            else {
+                yield copyFile(srcFile, destFile, force);
+            }
+        }
+        // Change the mode for the newly created directory
+        yield chmod(destDir, (yield stat(sourceDir)).mode);
+    });
+}
+// Buffered file copy
+function copyFile(srcFile, destFile, force) {
+    return __awaiter$5(this, void 0, void 0, function* () {
+        if ((yield lstat(srcFile)).isSymbolicLink()) {
+            // unlink/re-link it
+            try {
+                yield lstat(destFile);
+                yield unlink(destFile);
+            }
+            catch (e) {
+                // Try to override file permission
+                if (e.code === 'EPERM') {
+                    yield chmod(destFile, '0666');
+                    yield unlink(destFile);
+                }
+                // other errors = it doesn't exist, no work to do
+            }
+            // Copy over symlink
+            const symlinkFull = yield readlink(srcFile);
+            yield symlink(symlinkFull, destFile, IS_WINDOWS$2 ? 'junction' : null);
+        }
+        else if (!(yield exists(destFile)) || force) {
+            yield copyFile$1(srcFile, destFile);
+        }
+    });
+}
 
-var __awaiter$7 = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
+var __awaiter$4 = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
         function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
@@ -28183,7 +29052,7 @@ var __awaiter$7 = (undefined && undefined.__awaiter) || function (thisArg, _argu
     });
 };
 /* eslint-disable @typescript-eslint/unbound-method */
-const IS_WINDOWS$2 = process.platform === 'win32';
+const IS_WINDOWS$1 = process.platform === 'win32';
 /*
  * Class for running command line tools. Handles quoting and arg parsing in a platform agnostic way.
  */
@@ -28206,7 +29075,7 @@ class ToolRunner extends require$$1.EventEmitter {
         const toolPath = this._getSpawnFileName();
         const args = this._getSpawnArgs(options);
         let cmd = noPrefix ? '' : '[command]'; // omit prefix when piped to a second tool
-        if (IS_WINDOWS$2) {
+        if (IS_WINDOWS$1) {
             // Windows + cmd file
             if (this._isCmdFile()) {
                 cmd += toolPath;
@@ -28260,7 +29129,7 @@ class ToolRunner extends require$$1.EventEmitter {
         }
     }
     _getSpawnFileName() {
-        if (IS_WINDOWS$2) {
+        if (IS_WINDOWS$1) {
             if (this._isCmdFile()) {
                 return process.env['COMSPEC'] || 'cmd.exe';
             }
@@ -28268,7 +29137,7 @@ class ToolRunner extends require$$1.EventEmitter {
         return this.toolPath;
     }
     _getSpawnArgs(options) {
-        if (IS_WINDOWS$2) {
+        if (IS_WINDOWS$1) {
             if (this._isCmdFile()) {
                 let argline = `/D /S /C "${this._windowsQuoteCmdArg(this.toolPath)}`;
                 for (const a of this.args) {
@@ -28521,18 +29390,18 @@ class ToolRunner extends require$$1.EventEmitter {
      * @returns   number
      */
     exec() {
-        return __awaiter$7(this, void 0, void 0, function* () {
+        return __awaiter$4(this, void 0, void 0, function* () {
             // root the tool path if it is unrooted and contains relative pathing
-            if (!isRooted$1(this.toolPath) &&
+            if (!isRooted(this.toolPath) &&
                 (this.toolPath.includes('/') ||
-                    (IS_WINDOWS$2 && this.toolPath.includes('\\')))) {
+                    (IS_WINDOWS$1 && this.toolPath.includes('\\')))) {
                 // prefer options.cwd if it is specified, however options.cwd may also need to be rooted
                 this.toolPath = path$1.resolve(process.cwd(), this.options.cwd || process.cwd(), this.toolPath);
             }
             // if the tool is only a file name, then resolve it from the PATH
             // otherwise verify it exists (add extension on Windows if necessary)
-            this.toolPath = yield which$1(this.toolPath, true);
-            return new Promise((resolve, reject) => __awaiter$7(this, void 0, void 0, function* () {
+            this.toolPath = yield which(this.toolPath, true);
+            return new Promise((resolve, reject) => __awaiter$4(this, void 0, void 0, function* () {
                 this._debug(`exec tool: ${this.toolPath}`);
                 this._debug('arguments:');
                 for (const arg of this.args) {
@@ -28546,7 +29415,7 @@ class ToolRunner extends require$$1.EventEmitter {
                 state.on('debug', (message) => {
                     this._debug(message);
                 });
-                if (this.options.cwd && !(yield exists$1(this.options.cwd))) {
+                if (this.options.cwd && !(yield exists(this.options.cwd))) {
                     return reject(new Error(`The cwd: ${this.options.cwd} does not exist!`));
                 }
                 const fileName = this._getSpawnFileName();
@@ -28753,7 +29622,7 @@ class ExecState extends require$$1.EventEmitter {
     }
 }
 
-var __awaiter$6 = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
+var __awaiter$3 = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
         function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
@@ -28773,7 +29642,7 @@ var __awaiter$6 = (undefined && undefined.__awaiter) || function (thisArg, _argu
  * @returns   Promise<number>    exit code
  */
 function exec(commandLine, args, options) {
-    return __awaiter$6(this, void 0, void 0, function* () {
+    return __awaiter$3(this, void 0, void 0, function* () {
         const commandArgs = argStringToArray(commandLine);
         if (commandArgs.length === 0) {
             throw new Error(`Parameter 'commandLine' cannot be null or empty.`);
@@ -28956,409 +29825,6 @@ function saveState(name, value) {
     issueCommand('save-state', { name }, toCommandValue(value));
 }
 
-var __awaiter$5 = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
-    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
-    return new (P || (P = Promise))(function (resolve, reject) {
-        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
-        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
-        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
-        step((generator = generator.apply(thisArg, _arguments || [])).next());
-    });
-};
-const { chmod, copyFile: copyFile$1, lstat, mkdir, open, readdir, rename, rm, rmdir, stat, symlink, unlink } = fs.promises;
-// export const {open} = 'fs'
-const IS_WINDOWS$1 = process.platform === 'win32';
-/**
- * Custom implementation of readlink to ensure Windows junctions
- * maintain trailing backslash for backward compatibility with Node.js < 24
- *
- * In Node.js 20, Windows junctions (directory symlinks) always returned paths
- * with trailing backslashes. Node.js 24 removed this behavior, which breaks
- * code that relied on this format for path operations.
- *
- * This implementation restores the Node 20 behavior by adding a trailing
- * backslash to all junction results on Windows.
- */
-function readlink(fsPath) {
-    return __awaiter$5(this, void 0, void 0, function* () {
-        const result = yield fs.promises.readlink(fsPath);
-        // On Windows, restore Node 20 behavior: add trailing backslash to all results
-        // since junctions on Windows are always directory links
-        if (IS_WINDOWS$1 && !result.endsWith('\\')) {
-            return `${result}\\`;
-        }
-        return result;
-    });
-}
-fs.constants.O_RDONLY;
-function exists(fsPath) {
-    return __awaiter$5(this, void 0, void 0, function* () {
-        try {
-            yield stat(fsPath);
-        }
-        catch (err) {
-            if (err.code === 'ENOENT') {
-                return false;
-            }
-            throw err;
-        }
-        return true;
-    });
-}
-/**
- * On OSX/Linux, true if path starts with '/'. On Windows, true for paths like:
- * \, \hello, \\hello\share, C:, and C:\hello (and corresponding alternate separator cases).
- */
-function isRooted(p) {
-    p = normalizeSeparators(p);
-    if (!p) {
-        throw new Error('isRooted() parameter "p" cannot be empty');
-    }
-    if (IS_WINDOWS$1) {
-        return (p.startsWith('\\') || /^[A-Z]:/i.test(p) // e.g. \ or \hello or \\hello
-        ); // e.g. C: or C:\hello
-    }
-    return p.startsWith('/');
-}
-/**
- * Best effort attempt to determine whether a file exists and is executable.
- * @param filePath    file path to check
- * @param extensions  additional file extensions to try
- * @return if file exists and is executable, returns the file path. otherwise empty string.
- */
-function tryGetExecutablePath(filePath, extensions) {
-    return __awaiter$5(this, void 0, void 0, function* () {
-        let stats = undefined;
-        try {
-            // test file exists
-            stats = yield stat(filePath);
-        }
-        catch (err) {
-            if (err.code !== 'ENOENT') {
-                // eslint-disable-next-line no-console
-                console.log(`Unexpected error attempting to determine if executable file exists '${filePath}': ${err}`);
-            }
-        }
-        if (stats && stats.isFile()) {
-            if (IS_WINDOWS$1) {
-                // on Windows, test for valid extension
-                const upperExt = path$1.extname(filePath).toUpperCase();
-                if (extensions.some(validExt => validExt.toUpperCase() === upperExt)) {
-                    return filePath;
-                }
-            }
-            else {
-                if (isUnixExecutable(stats)) {
-                    return filePath;
-                }
-            }
-        }
-        // try each extension
-        const originalFilePath = filePath;
-        for (const extension of extensions) {
-            filePath = originalFilePath + extension;
-            stats = undefined;
-            try {
-                stats = yield stat(filePath);
-            }
-            catch (err) {
-                if (err.code !== 'ENOENT') {
-                    // eslint-disable-next-line no-console
-                    console.log(`Unexpected error attempting to determine if executable file exists '${filePath}': ${err}`);
-                }
-            }
-            if (stats && stats.isFile()) {
-                if (IS_WINDOWS$1) {
-                    // preserve the case of the actual file (since an extension was appended)
-                    try {
-                        const directory = path$1.dirname(filePath);
-                        const upperName = path$1.basename(filePath).toUpperCase();
-                        for (const actualName of yield readdir(directory)) {
-                            if (upperName === actualName.toUpperCase()) {
-                                filePath = path$1.join(directory, actualName);
-                                break;
-                            }
-                        }
-                    }
-                    catch (err) {
-                        // eslint-disable-next-line no-console
-                        console.log(`Unexpected error attempting to determine the actual case of the file '${filePath}': ${err}`);
-                    }
-                    return filePath;
-                }
-                else {
-                    if (isUnixExecutable(stats)) {
-                        return filePath;
-                    }
-                }
-            }
-        }
-        return '';
-    });
-}
-function normalizeSeparators(p) {
-    p = p || '';
-    if (IS_WINDOWS$1) {
-        // convert slashes on Windows
-        p = p.replace(/\//g, '\\');
-        // remove redundant slashes
-        return p.replace(/\\\\+/g, '\\');
-    }
-    // remove redundant slashes
-    return p.replace(/\/\/+/g, '/');
-}
-// on Mac/Linux, test the execute bit
-//     R   W  X  R  W X R W X
-//   256 128 64 32 16 8 4 2 1
-function isUnixExecutable(stats) {
-    return ((stats.mode & 1) > 0 ||
-        ((stats.mode & 8) > 0 &&
-            process.getgid !== undefined &&
-            stats.gid === process.getgid()) ||
-        ((stats.mode & 64) > 0 &&
-            process.getuid !== undefined &&
-            stats.uid === process.getuid()));
-}
-
-var __awaiter$4 = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
-    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
-    return new (P || (P = Promise))(function (resolve, reject) {
-        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
-        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
-        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
-        step((generator = generator.apply(thisArg, _arguments || [])).next());
-    });
-};
-/**
- * Copies a file or folder.
- * Based off of shelljs - https://github.com/shelljs/shelljs/blob/9237f66c52e5daa40458f94f9565e18e8132f5a6/src/cp.js
- *
- * @param     source    source path
- * @param     dest      destination path
- * @param     options   optional. See CopyOptions.
- */
-function cp(source_1, dest_1) {
-    return __awaiter$4(this, arguments, void 0, function* (source, dest, options = {}) {
-        const { force, recursive, copySourceDirectory } = readCopyOptions(options);
-        const destStat = (yield exists(dest)) ? yield stat(dest) : null;
-        // Dest is an existing file, but not forcing
-        if (destStat && destStat.isFile() && !force) {
-            return;
-        }
-        // If dest is an existing directory, should copy inside.
-        const newDest = destStat && destStat.isDirectory() && copySourceDirectory
-            ? path$1.join(dest, path$1.basename(source))
-            : dest;
-        if (!(yield exists(source))) {
-            throw new Error(`no such file or directory: ${source}`);
-        }
-        const sourceStat = yield stat(source);
-        if (sourceStat.isDirectory()) {
-            if (!recursive) {
-                throw new Error(`Failed to copy. ${source} is a directory, but tried to copy without recursive flag.`);
-            }
-            else {
-                yield cpDirRecursive(source, newDest, 0, force);
-            }
-        }
-        else {
-            if (path$1.relative(source, newDest) === '') {
-                // a file cannot be copied to itself
-                throw new Error(`'${newDest}' and '${source}' are the same file`);
-            }
-            yield copyFile(source, newDest, force);
-        }
-    });
-}
-/**
- * Remove a path recursively with force
- *
- * @param inputPath path to remove
- */
-function rmRF(inputPath) {
-    return __awaiter$4(this, void 0, void 0, function* () {
-        if (IS_WINDOWS$1) {
-            // Check for invalid characters
-            // https://docs.microsoft.com/en-us/windows/win32/fileio/naming-a-file
-            if (/[*"<>|]/.test(inputPath)) {
-                throw new Error('File path must not contain `*`, `"`, `<`, `>` or `|` on Windows');
-            }
-        }
-        try {
-            // note if path does not exist, error is silent
-            yield rm(inputPath, {
-                force: true,
-                maxRetries: 3,
-                recursive: true,
-                retryDelay: 300
-            });
-        }
-        catch (err) {
-            throw new Error(`File was unable to be removed ${err}`);
-        }
-    });
-}
-/**
- * Make a directory.  Creates the full path with folders in between
- * Will throw if it fails
- *
- * @param   fsPath        path to create
- * @returns Promise<void>
- */
-function mkdirP(fsPath) {
-    return __awaiter$4(this, void 0, void 0, function* () {
-        ok(fsPath, 'a path argument must be provided');
-        yield mkdir(fsPath, { recursive: true });
-    });
-}
-/**
- * Returns path of a tool had the tool actually been invoked.  Resolves via paths.
- * If you check and the tool does not exist, it will throw.
- *
- * @param     tool              name of the tool
- * @param     check             whether to check if tool exists
- * @returns   Promise<string>   path to tool
- */
-function which(tool, check) {
-    return __awaiter$4(this, void 0, void 0, function* () {
-        if (!tool) {
-            throw new Error("parameter 'tool' is required");
-        }
-        // recursive when check=true
-        if (check) {
-            const result = yield which(tool, false);
-            if (!result) {
-                if (IS_WINDOWS$1) {
-                    throw new Error(`Unable to locate executable file: ${tool}. Please verify either the file path exists or the file can be found within a directory specified by the PATH environment variable. Also verify the file has a valid extension for an executable file.`);
-                }
-                else {
-                    throw new Error(`Unable to locate executable file: ${tool}. Please verify either the file path exists or the file can be found within a directory specified by the PATH environment variable. Also check the file mode to verify the file is executable.`);
-                }
-            }
-            return result;
-        }
-        const matches = yield findInPath(tool);
-        if (matches && matches.length > 0) {
-            return matches[0];
-        }
-        return '';
-    });
-}
-/**
- * Returns a list of all occurrences of the given tool on the system path.
- *
- * @returns   Promise<string[]>  the paths of the tool
- */
-function findInPath(tool) {
-    return __awaiter$4(this, void 0, void 0, function* () {
-        if (!tool) {
-            throw new Error("parameter 'tool' is required");
-        }
-        // build the list of extensions to try
-        const extensions = [];
-        if (IS_WINDOWS$1 && process.env['PATHEXT']) {
-            for (const extension of process.env['PATHEXT'].split(path$1.delimiter)) {
-                if (extension) {
-                    extensions.push(extension);
-                }
-            }
-        }
-        // if it's rooted, return it if exists. otherwise return empty.
-        if (isRooted(tool)) {
-            const filePath = yield tryGetExecutablePath(tool, extensions);
-            if (filePath) {
-                return [filePath];
-            }
-            return [];
-        }
-        // if any path separators, return empty
-        if (tool.includes(path$1.sep)) {
-            return [];
-        }
-        // build the list of directories
-        //
-        // Note, technically "where" checks the current directory on Windows. From a toolkit perspective,
-        // it feels like we should not do this. Checking the current directory seems like more of a use
-        // case of a shell, and the which() function exposed by the toolkit should strive for consistency
-        // across platforms.
-        const directories = [];
-        if (process.env.PATH) {
-            for (const p of process.env.PATH.split(path$1.delimiter)) {
-                if (p) {
-                    directories.push(p);
-                }
-            }
-        }
-        // find all matches
-        const matches = [];
-        for (const directory of directories) {
-            const filePath = yield tryGetExecutablePath(path$1.join(directory, tool), extensions);
-            if (filePath) {
-                matches.push(filePath);
-            }
-        }
-        return matches;
-    });
-}
-function readCopyOptions(options) {
-    const force = options.force == null ? true : options.force;
-    const recursive = Boolean(options.recursive);
-    const copySourceDirectory = options.copySourceDirectory == null
-        ? true
-        : Boolean(options.copySourceDirectory);
-    return { force, recursive, copySourceDirectory };
-}
-function cpDirRecursive(sourceDir, destDir, currentDepth, force) {
-    return __awaiter$4(this, void 0, void 0, function* () {
-        // Ensure there is not a run away recursive copy
-        if (currentDepth >= 255)
-            return;
-        currentDepth++;
-        yield mkdirP(destDir);
-        const files = yield readdir(sourceDir);
-        for (const fileName of files) {
-            const srcFile = `${sourceDir}/${fileName}`;
-            const destFile = `${destDir}/${fileName}`;
-            const srcFileStat = yield lstat(srcFile);
-            if (srcFileStat.isDirectory()) {
-                // Recurse
-                yield cpDirRecursive(srcFile, destFile, currentDepth, force);
-            }
-            else {
-                yield copyFile(srcFile, destFile, force);
-            }
-        }
-        // Change the mode for the newly created directory
-        yield chmod(destDir, (yield stat(sourceDir)).mode);
-    });
-}
-// Buffered file copy
-function copyFile(srcFile, destFile, force) {
-    return __awaiter$4(this, void 0, void 0, function* () {
-        if ((yield lstat(srcFile)).isSymbolicLink()) {
-            // unlink/re-link it
-            try {
-                yield lstat(destFile);
-                yield unlink(destFile);
-            }
-            catch (e) {
-                // Try to override file permission
-                if (e.code === 'EPERM') {
-                    yield chmod(destFile, '0666');
-                    yield unlink(destFile);
-                }
-                // other errors = it doesn't exist, no work to do
-            }
-            // Copy over symlink
-            const symlinkFull = yield readlink(srcFile);
-            yield symlink(symlinkFull, destFile, IS_WINDOWS$1 ? 'junction' : null);
-        }
-        else if (!(yield exists(destFile)) || force) {
-            yield copyFile$1(srcFile, destFile);
-        }
-    });
-}
-
 var re = {exports: {}};
 
 var constants$2;
@@ -29510,8 +29976,8 @@ function requireRe () {
 
 		// ## Pre-release Version Identifier
 		// A numeric identifier, or a non-numeric identifier.
-		// Non-numberic identifiers include numberic identifiers but can be longer.
-		// Therefore non-numberic identifiers must go first.
+		// Non-numeric identifiers include numeric identifiers but can be longer.
+		// Therefore non-numeric identifiers must go first.
 
 		createToken('PRERELEASEIDENTIFIER', `(?:${src[t.NONNUMERICIDENTIFIER]
 		}|${src[t.NUMERICIDENTIFIER]})`);
@@ -30207,7 +30673,7 @@ function requireDiff () {
 	    return prefix + 'patch'
 	  }
 
-	  // high and low are preleases
+	  // high and low are prereleases
 	  return 'prerelease'
 	};
 
@@ -31766,7 +32232,7 @@ function requireSubset () {
 	// - If LT
 	//   - If LT.semver is greater than any < or <= comp in C, return false
 	//   - If LT is <=, and LT.semver does not satisfy every C, return false
-	//   - If GT.semver has a prerelease, and not in prerelease mode
+	//   - If LT.semver has a prerelease, and not in prerelease mode
 	//     - If no C has a prerelease and the LT.semver tuple, return false
 	// - Else return true
 
@@ -32088,775 +32554,6 @@ var semverExports = requireSemver();
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
-
-function getProxyUrl(reqUrl) {
-    const usingSsl = reqUrl.protocol === 'https:';
-    if (checkBypass(reqUrl)) {
-        return undefined;
-    }
-    const proxyVar = (() => {
-        if (usingSsl) {
-            return process.env['https_proxy'] || process.env['HTTPS_PROXY'];
-        }
-        else {
-            return process.env['http_proxy'] || process.env['HTTP_PROXY'];
-        }
-    })();
-    if (proxyVar) {
-        try {
-            return new DecodedURL(proxyVar);
-        }
-        catch (_a) {
-            if (!proxyVar.startsWith('http://') && !proxyVar.startsWith('https://'))
-                return new DecodedURL(`http://${proxyVar}`);
-        }
-    }
-    else {
-        return undefined;
-    }
-}
-function checkBypass(reqUrl) {
-    if (!reqUrl.hostname) {
-        return false;
-    }
-    const reqHost = reqUrl.hostname;
-    if (isLoopbackAddress(reqHost)) {
-        return true;
-    }
-    const noProxy = process.env['no_proxy'] || process.env['NO_PROXY'] || '';
-    if (!noProxy) {
-        return false;
-    }
-    // Determine the request port
-    let reqPort;
-    if (reqUrl.port) {
-        reqPort = Number(reqUrl.port);
-    }
-    else if (reqUrl.protocol === 'http:') {
-        reqPort = 80;
-    }
-    else if (reqUrl.protocol === 'https:') {
-        reqPort = 443;
-    }
-    // Format the request hostname and hostname with port
-    const upperReqHosts = [reqUrl.hostname.toUpperCase()];
-    if (typeof reqPort === 'number') {
-        upperReqHosts.push(`${upperReqHosts[0]}:${reqPort}`);
-    }
-    // Compare request host against noproxy
-    for (const upperNoProxyItem of noProxy
-        .split(',')
-        .map(x => x.trim().toUpperCase())
-        .filter(x => x)) {
-        if (upperNoProxyItem === '*' ||
-            upperReqHosts.some(x => x === upperNoProxyItem ||
-                x.endsWith(`.${upperNoProxyItem}`) ||
-                (upperNoProxyItem.startsWith('.') &&
-                    x.endsWith(`${upperNoProxyItem}`)))) {
-            return true;
-        }
-    }
-    return false;
-}
-function isLoopbackAddress(host) {
-    const hostLower = host.toLowerCase();
-    return (hostLower === 'localhost' ||
-        hostLower.startsWith('127.') ||
-        hostLower.startsWith('[::1]') ||
-        hostLower.startsWith('[0:0:0:0:0:0:0:1]'));
-}
-class DecodedURL extends URL {
-    constructor(url, base) {
-        super(url, base);
-        this._decodedUsername = decodeURIComponent(super.username);
-        this._decodedPassword = decodeURIComponent(super.password);
-    }
-    get username() {
-        return this._decodedUsername;
-    }
-    get password() {
-        return this._decodedPassword;
-    }
-}
-
-/* eslint-disable @typescript-eslint/no-explicit-any */
-var __awaiter$3 = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
-    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
-    return new (P || (P = Promise))(function (resolve, reject) {
-        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
-        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
-        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
-        step((generator = generator.apply(thisArg, _arguments || [])).next());
-    });
-};
-var HttpCodes$1;
-(function (HttpCodes) {
-    HttpCodes[HttpCodes["OK"] = 200] = "OK";
-    HttpCodes[HttpCodes["MultipleChoices"] = 300] = "MultipleChoices";
-    HttpCodes[HttpCodes["MovedPermanently"] = 301] = "MovedPermanently";
-    HttpCodes[HttpCodes["ResourceMoved"] = 302] = "ResourceMoved";
-    HttpCodes[HttpCodes["SeeOther"] = 303] = "SeeOther";
-    HttpCodes[HttpCodes["NotModified"] = 304] = "NotModified";
-    HttpCodes[HttpCodes["UseProxy"] = 305] = "UseProxy";
-    HttpCodes[HttpCodes["SwitchProxy"] = 306] = "SwitchProxy";
-    HttpCodes[HttpCodes["TemporaryRedirect"] = 307] = "TemporaryRedirect";
-    HttpCodes[HttpCodes["PermanentRedirect"] = 308] = "PermanentRedirect";
-    HttpCodes[HttpCodes["BadRequest"] = 400] = "BadRequest";
-    HttpCodes[HttpCodes["Unauthorized"] = 401] = "Unauthorized";
-    HttpCodes[HttpCodes["PaymentRequired"] = 402] = "PaymentRequired";
-    HttpCodes[HttpCodes["Forbidden"] = 403] = "Forbidden";
-    HttpCodes[HttpCodes["NotFound"] = 404] = "NotFound";
-    HttpCodes[HttpCodes["MethodNotAllowed"] = 405] = "MethodNotAllowed";
-    HttpCodes[HttpCodes["NotAcceptable"] = 406] = "NotAcceptable";
-    HttpCodes[HttpCodes["ProxyAuthenticationRequired"] = 407] = "ProxyAuthenticationRequired";
-    HttpCodes[HttpCodes["RequestTimeout"] = 408] = "RequestTimeout";
-    HttpCodes[HttpCodes["Conflict"] = 409] = "Conflict";
-    HttpCodes[HttpCodes["Gone"] = 410] = "Gone";
-    HttpCodes[HttpCodes["TooManyRequests"] = 429] = "TooManyRequests";
-    HttpCodes[HttpCodes["InternalServerError"] = 500] = "InternalServerError";
-    HttpCodes[HttpCodes["NotImplemented"] = 501] = "NotImplemented";
-    HttpCodes[HttpCodes["BadGateway"] = 502] = "BadGateway";
-    HttpCodes[HttpCodes["ServiceUnavailable"] = 503] = "ServiceUnavailable";
-    HttpCodes[HttpCodes["GatewayTimeout"] = 504] = "GatewayTimeout";
-})(HttpCodes$1 || (HttpCodes$1 = {}));
-var Headers$1;
-(function (Headers) {
-    Headers["Accept"] = "accept";
-    Headers["ContentType"] = "content-type";
-})(Headers$1 || (Headers$1 = {}));
-var MediaTypes$1;
-(function (MediaTypes) {
-    MediaTypes["ApplicationJson"] = "application/json";
-})(MediaTypes$1 || (MediaTypes$1 = {}));
-const HttpRedirectCodes = [
-    HttpCodes$1.MovedPermanently,
-    HttpCodes$1.ResourceMoved,
-    HttpCodes$1.SeeOther,
-    HttpCodes$1.TemporaryRedirect,
-    HttpCodes$1.PermanentRedirect
-];
-const HttpResponseRetryCodes = [
-    HttpCodes$1.BadGateway,
-    HttpCodes$1.ServiceUnavailable,
-    HttpCodes$1.GatewayTimeout
-];
-const RetryableHttpVerbs = ['OPTIONS', 'GET', 'DELETE', 'HEAD'];
-const ExponentialBackoffCeiling = 10;
-const ExponentialBackoffTimeSlice = 5;
-class HttpClientError extends Error {
-    constructor(message, statusCode) {
-        super(message);
-        this.name = 'HttpClientError';
-        this.statusCode = statusCode;
-        Object.setPrototypeOf(this, HttpClientError.prototype);
-    }
-}
-class HttpClientResponse {
-    constructor(message) {
-        this.message = message;
-    }
-    readBody() {
-        return __awaiter$3(this, void 0, void 0, function* () {
-            return new Promise((resolve) => __awaiter$3(this, void 0, void 0, function* () {
-                let output = Buffer.alloc(0);
-                this.message.on('data', (chunk) => {
-                    output = Buffer.concat([output, chunk]);
-                });
-                this.message.on('end', () => {
-                    resolve(output.toString());
-                });
-            }));
-        });
-    }
-    readBodyBuffer() {
-        return __awaiter$3(this, void 0, void 0, function* () {
-            return new Promise((resolve) => __awaiter$3(this, void 0, void 0, function* () {
-                const chunks = [];
-                this.message.on('data', (chunk) => {
-                    chunks.push(chunk);
-                });
-                this.message.on('end', () => {
-                    resolve(Buffer.concat(chunks));
-                });
-            }));
-        });
-    }
-}
-class HttpClient {
-    constructor(userAgent, handlers, requestOptions) {
-        this._ignoreSslError = false;
-        this._allowRedirects = true;
-        this._allowRedirectDowngrade = false;
-        this._maxRedirects = 50;
-        this._allowRetries = false;
-        this._maxRetries = 1;
-        this._keepAlive = false;
-        this._disposed = false;
-        this.userAgent = this._getUserAgentWithOrchestrationId(userAgent);
-        this.handlers = handlers || [];
-        this.requestOptions = requestOptions;
-        if (requestOptions) {
-            if (requestOptions.ignoreSslError != null) {
-                this._ignoreSslError = requestOptions.ignoreSslError;
-            }
-            this._socketTimeout = requestOptions.socketTimeout;
-            if (requestOptions.allowRedirects != null) {
-                this._allowRedirects = requestOptions.allowRedirects;
-            }
-            if (requestOptions.allowRedirectDowngrade != null) {
-                this._allowRedirectDowngrade = requestOptions.allowRedirectDowngrade;
-            }
-            if (requestOptions.maxRedirects != null) {
-                this._maxRedirects = Math.max(requestOptions.maxRedirects, 0);
-            }
-            if (requestOptions.keepAlive != null) {
-                this._keepAlive = requestOptions.keepAlive;
-            }
-            if (requestOptions.allowRetries != null) {
-                this._allowRetries = requestOptions.allowRetries;
-            }
-            if (requestOptions.maxRetries != null) {
-                this._maxRetries = requestOptions.maxRetries;
-            }
-        }
-    }
-    options(requestUrl, additionalHeaders) {
-        return __awaiter$3(this, void 0, void 0, function* () {
-            return this.request('OPTIONS', requestUrl, null, additionalHeaders || {});
-        });
-    }
-    get(requestUrl, additionalHeaders) {
-        return __awaiter$3(this, void 0, void 0, function* () {
-            return this.request('GET', requestUrl, null, additionalHeaders || {});
-        });
-    }
-    del(requestUrl, additionalHeaders) {
-        return __awaiter$3(this, void 0, void 0, function* () {
-            return this.request('DELETE', requestUrl, null, additionalHeaders || {});
-        });
-    }
-    post(requestUrl, data, additionalHeaders) {
-        return __awaiter$3(this, void 0, void 0, function* () {
-            return this.request('POST', requestUrl, data, additionalHeaders || {});
-        });
-    }
-    patch(requestUrl, data, additionalHeaders) {
-        return __awaiter$3(this, void 0, void 0, function* () {
-            return this.request('PATCH', requestUrl, data, additionalHeaders || {});
-        });
-    }
-    put(requestUrl, data, additionalHeaders) {
-        return __awaiter$3(this, void 0, void 0, function* () {
-            return this.request('PUT', requestUrl, data, additionalHeaders || {});
-        });
-    }
-    head(requestUrl, additionalHeaders) {
-        return __awaiter$3(this, void 0, void 0, function* () {
-            return this.request('HEAD', requestUrl, null, additionalHeaders || {});
-        });
-    }
-    sendStream(verb, requestUrl, stream, additionalHeaders) {
-        return __awaiter$3(this, void 0, void 0, function* () {
-            return this.request(verb, requestUrl, stream, additionalHeaders);
-        });
-    }
-    /**
-     * Gets a typed object from an endpoint
-     * Be aware that not found returns a null.  Other errors (4xx, 5xx) reject the promise
-     */
-    getJson(requestUrl_1) {
-        return __awaiter$3(this, arguments, void 0, function* (requestUrl, additionalHeaders = {}) {
-            additionalHeaders[Headers$1.Accept] = this._getExistingOrDefaultHeader(additionalHeaders, Headers$1.Accept, MediaTypes$1.ApplicationJson);
-            const res = yield this.get(requestUrl, additionalHeaders);
-            return this._processResponse(res, this.requestOptions);
-        });
-    }
-    postJson(requestUrl_1, obj_1) {
-        return __awaiter$3(this, arguments, void 0, function* (requestUrl, obj, additionalHeaders = {}) {
-            const data = JSON.stringify(obj, null, 2);
-            additionalHeaders[Headers$1.Accept] = this._getExistingOrDefaultHeader(additionalHeaders, Headers$1.Accept, MediaTypes$1.ApplicationJson);
-            additionalHeaders[Headers$1.ContentType] =
-                this._getExistingOrDefaultContentTypeHeader(additionalHeaders, MediaTypes$1.ApplicationJson);
-            const res = yield this.post(requestUrl, data, additionalHeaders);
-            return this._processResponse(res, this.requestOptions);
-        });
-    }
-    putJson(requestUrl_1, obj_1) {
-        return __awaiter$3(this, arguments, void 0, function* (requestUrl, obj, additionalHeaders = {}) {
-            const data = JSON.stringify(obj, null, 2);
-            additionalHeaders[Headers$1.Accept] = this._getExistingOrDefaultHeader(additionalHeaders, Headers$1.Accept, MediaTypes$1.ApplicationJson);
-            additionalHeaders[Headers$1.ContentType] =
-                this._getExistingOrDefaultContentTypeHeader(additionalHeaders, MediaTypes$1.ApplicationJson);
-            const res = yield this.put(requestUrl, data, additionalHeaders);
-            return this._processResponse(res, this.requestOptions);
-        });
-    }
-    patchJson(requestUrl_1, obj_1) {
-        return __awaiter$3(this, arguments, void 0, function* (requestUrl, obj, additionalHeaders = {}) {
-            const data = JSON.stringify(obj, null, 2);
-            additionalHeaders[Headers$1.Accept] = this._getExistingOrDefaultHeader(additionalHeaders, Headers$1.Accept, MediaTypes$1.ApplicationJson);
-            additionalHeaders[Headers$1.ContentType] =
-                this._getExistingOrDefaultContentTypeHeader(additionalHeaders, MediaTypes$1.ApplicationJson);
-            const res = yield this.patch(requestUrl, data, additionalHeaders);
-            return this._processResponse(res, this.requestOptions);
-        });
-    }
-    /**
-     * Makes a raw http request.
-     * All other methods such as get, post, patch, and request ultimately call this.
-     * Prefer get, del, post and patch
-     */
-    request(verb, requestUrl, data, headers) {
-        return __awaiter$3(this, void 0, void 0, function* () {
-            if (this._disposed) {
-                throw new Error('Client has already been disposed.');
-            }
-            const parsedUrl = new URL(requestUrl);
-            let info = this._prepareRequest(verb, parsedUrl, headers);
-            // Only perform retries on reads since writes may not be idempotent.
-            const maxTries = this._allowRetries && RetryableHttpVerbs.includes(verb)
-                ? this._maxRetries + 1
-                : 1;
-            let numTries = 0;
-            let response;
-            do {
-                response = yield this.requestRaw(info, data);
-                // Check if it's an authentication challenge
-                if (response &&
-                    response.message &&
-                    response.message.statusCode === HttpCodes$1.Unauthorized) {
-                    let authenticationHandler;
-                    for (const handler of this.handlers) {
-                        if (handler.canHandleAuthentication(response)) {
-                            authenticationHandler = handler;
-                            break;
-                        }
-                    }
-                    if (authenticationHandler) {
-                        return authenticationHandler.handleAuthentication(this, info, data);
-                    }
-                    else {
-                        // We have received an unauthorized response but have no handlers to handle it.
-                        // Let the response return to the caller.
-                        return response;
-                    }
-                }
-                let redirectsRemaining = this._maxRedirects;
-                while (response.message.statusCode &&
-                    HttpRedirectCodes.includes(response.message.statusCode) &&
-                    this._allowRedirects &&
-                    redirectsRemaining > 0) {
-                    const redirectUrl = response.message.headers['location'];
-                    if (!redirectUrl) {
-                        // if there's no location to redirect to, we won't
-                        break;
-                    }
-                    const parsedRedirectUrl = new URL(redirectUrl);
-                    if (parsedUrl.protocol === 'https:' &&
-                        parsedUrl.protocol !== parsedRedirectUrl.protocol &&
-                        !this._allowRedirectDowngrade) {
-                        throw new Error('Redirect from HTTPS to HTTP protocol. This downgrade is not allowed for security reasons. If you want to allow this behavior, set the allowRedirectDowngrade option to true.');
-                    }
-                    // we need to finish reading the response before reassigning response
-                    // which will leak the open socket.
-                    yield response.readBody();
-                    // strip authorization header if redirected to a different hostname
-                    if (parsedRedirectUrl.hostname !== parsedUrl.hostname) {
-                        for (const header in headers) {
-                            // header names are case insensitive
-                            if (header.toLowerCase() === 'authorization') {
-                                delete headers[header];
-                            }
-                        }
-                    }
-                    // let's make the request with the new redirectUrl
-                    info = this._prepareRequest(verb, parsedRedirectUrl, headers);
-                    response = yield this.requestRaw(info, data);
-                    redirectsRemaining--;
-                }
-                if (!response.message.statusCode ||
-                    !HttpResponseRetryCodes.includes(response.message.statusCode)) {
-                    // If not a retry code, return immediately instead of retrying
-                    return response;
-                }
-                numTries += 1;
-                if (numTries < maxTries) {
-                    yield response.readBody();
-                    yield this._performExponentialBackoff(numTries);
-                }
-            } while (numTries < maxTries);
-            return response;
-        });
-    }
-    /**
-     * Needs to be called if keepAlive is set to true in request options.
-     */
-    dispose() {
-        if (this._agent) {
-            this._agent.destroy();
-        }
-        this._disposed = true;
-    }
-    /**
-     * Raw request.
-     * @param info
-     * @param data
-     */
-    requestRaw(info, data) {
-        return __awaiter$3(this, void 0, void 0, function* () {
-            return new Promise((resolve, reject) => {
-                function callbackForResult(err, res) {
-                    if (err) {
-                        reject(err);
-                    }
-                    else if (!res) {
-                        // If `err` is not passed, then `res` must be passed.
-                        reject(new Error('Unknown error'));
-                    }
-                    else {
-                        resolve(res);
-                    }
-                }
-                this.requestRawWithCallback(info, data, callbackForResult);
-            });
-        });
-    }
-    /**
-     * Raw request with callback.
-     * @param info
-     * @param data
-     * @param onResult
-     */
-    requestRawWithCallback(info, data, onResult) {
-        if (typeof data === 'string') {
-            if (!info.options.headers) {
-                info.options.headers = {};
-            }
-            info.options.headers['Content-Length'] = Buffer.byteLength(data, 'utf8');
-        }
-        let callbackCalled = false;
-        function handleResult(err, res) {
-            if (!callbackCalled) {
-                callbackCalled = true;
-                onResult(err, res);
-            }
-        }
-        const req = info.httpModule.request(info.options, (msg) => {
-            const res = new HttpClientResponse(msg);
-            handleResult(undefined, res);
-        });
-        let socket;
-        req.on('socket', sock => {
-            socket = sock;
-        });
-        // If we ever get disconnected, we want the socket to timeout eventually
-        req.setTimeout(this._socketTimeout || 3 * 60000, () => {
-            if (socket) {
-                socket.end();
-            }
-            handleResult(new Error(`Request timeout: ${info.options.path}`));
-        });
-        req.on('error', function (err) {
-            // err has statusCode property
-            // res should have headers
-            handleResult(err);
-        });
-        if (data && typeof data === 'string') {
-            req.write(data, 'utf8');
-        }
-        if (data && typeof data !== 'string') {
-            data.on('close', function () {
-                req.end();
-            });
-            data.pipe(req);
-        }
-        else {
-            req.end();
-        }
-    }
-    /**
-     * Gets an http agent. This function is useful when you need an http agent that handles
-     * routing through a proxy server - depending upon the url and proxy environment variables.
-     * @param serverUrl  The server URL where the request will be sent. For example, https://api.github.com
-     */
-    getAgent(serverUrl) {
-        const parsedUrl = new URL(serverUrl);
-        return this._getAgent(parsedUrl);
-    }
-    getAgentDispatcher(serverUrl) {
-        const parsedUrl = new URL(serverUrl);
-        const proxyUrl = getProxyUrl(parsedUrl);
-        const useProxy = proxyUrl && proxyUrl.hostname;
-        if (!useProxy) {
-            return;
-        }
-        return this._getProxyAgentDispatcher(parsedUrl, proxyUrl);
-    }
-    _prepareRequest(method, requestUrl, headers) {
-        const info = {};
-        info.parsedUrl = requestUrl;
-        const usingSsl = info.parsedUrl.protocol === 'https:';
-        info.httpModule = usingSsl ? https : http;
-        const defaultPort = usingSsl ? 443 : 80;
-        info.options = {};
-        info.options.host = info.parsedUrl.hostname;
-        info.options.port = info.parsedUrl.port
-            ? parseInt(info.parsedUrl.port)
-            : defaultPort;
-        info.options.path =
-            (info.parsedUrl.pathname || '') + (info.parsedUrl.search || '');
-        info.options.method = method;
-        info.options.headers = this._mergeHeaders(headers);
-        if (this.userAgent != null) {
-            info.options.headers['user-agent'] = this.userAgent;
-        }
-        info.options.agent = this._getAgent(info.parsedUrl);
-        // gives handlers an opportunity to participate
-        if (this.handlers) {
-            for (const handler of this.handlers) {
-                handler.prepareRequest(info.options);
-            }
-        }
-        return info;
-    }
-    _mergeHeaders(headers) {
-        if (this.requestOptions && this.requestOptions.headers) {
-            return Object.assign({}, lowercaseKeys$1(this.requestOptions.headers), lowercaseKeys$1(headers || {}));
-        }
-        return lowercaseKeys$1(headers || {});
-    }
-    /**
-     * Gets an existing header value or returns a default.
-     * Handles converting number header values to strings since HTTP headers must be strings.
-     * Note: This returns string | string[] since some headers can have multiple values.
-     * For headers that must always be a single string (like Content-Type), use the
-     * specialized _getExistingOrDefaultContentTypeHeader method instead.
-     */
-    _getExistingOrDefaultHeader(additionalHeaders, header, _default) {
-        let clientHeader;
-        if (this.requestOptions && this.requestOptions.headers) {
-            const headerValue = lowercaseKeys$1(this.requestOptions.headers)[header];
-            if (headerValue) {
-                clientHeader =
-                    typeof headerValue === 'number' ? headerValue.toString() : headerValue;
-            }
-        }
-        const additionalValue = additionalHeaders[header];
-        if (additionalValue !== undefined) {
-            return typeof additionalValue === 'number'
-                ? additionalValue.toString()
-                : additionalValue;
-        }
-        if (clientHeader !== undefined) {
-            return clientHeader;
-        }
-        return _default;
-    }
-    /**
-     * Specialized version of _getExistingOrDefaultHeader for Content-Type header.
-     * Always returns a single string (not an array) since Content-Type should be a single value.
-     * Converts arrays to comma-separated strings and numbers to strings to ensure type safety.
-     * This was split from _getExistingOrDefaultHeader to provide stricter typing for callers
-     * that assign the result to places expecting a string (e.g., additionalHeaders[Headers.ContentType]).
-     */
-    _getExistingOrDefaultContentTypeHeader(additionalHeaders, _default) {
-        let clientHeader;
-        if (this.requestOptions && this.requestOptions.headers) {
-            const headerValue = lowercaseKeys$1(this.requestOptions.headers)[Headers$1.ContentType];
-            if (headerValue) {
-                if (typeof headerValue === 'number') {
-                    clientHeader = String(headerValue);
-                }
-                else if (Array.isArray(headerValue)) {
-                    clientHeader = headerValue.join(', ');
-                }
-                else {
-                    clientHeader = headerValue;
-                }
-            }
-        }
-        const additionalValue = additionalHeaders[Headers$1.ContentType];
-        // Return the first non-undefined value, converting numbers or arrays to strings if necessary
-        if (additionalValue !== undefined) {
-            if (typeof additionalValue === 'number') {
-                return String(additionalValue);
-            }
-            else if (Array.isArray(additionalValue)) {
-                return additionalValue.join(', ');
-            }
-            else {
-                return additionalValue;
-            }
-        }
-        if (clientHeader !== undefined) {
-            return clientHeader;
-        }
-        return _default;
-    }
-    _getAgent(parsedUrl) {
-        let agent;
-        const proxyUrl = getProxyUrl(parsedUrl);
-        const useProxy = proxyUrl && proxyUrl.hostname;
-        if (this._keepAlive && useProxy) {
-            agent = this._proxyAgent;
-        }
-        if (!useProxy) {
-            agent = this._agent;
-        }
-        // if agent is already assigned use that agent.
-        if (agent) {
-            return agent;
-        }
-        const usingSsl = parsedUrl.protocol === 'https:';
-        let maxSockets = 100;
-        if (this.requestOptions) {
-            maxSockets = this.requestOptions.maxSockets || http.globalAgent.maxSockets;
-        }
-        // This is `useProxy` again, but we need to check `proxyURl` directly for TypeScripts's flow analysis.
-        if (proxyUrl && proxyUrl.hostname) {
-            const agentOptions = {
-                maxSockets,
-                keepAlive: this._keepAlive,
-                proxy: Object.assign(Object.assign({}, ((proxyUrl.username || proxyUrl.password) && {
-                    proxyAuth: `${proxyUrl.username}:${proxyUrl.password}`
-                })), { host: proxyUrl.hostname, port: proxyUrl.port })
-            };
-            let tunnelAgent;
-            const overHttps = proxyUrl.protocol === 'https:';
-            if (usingSsl) {
-                tunnelAgent = overHttps ? tunnelExports.httpsOverHttps : tunnelExports.httpsOverHttp;
-            }
-            else {
-                tunnelAgent = overHttps ? tunnelExports.httpOverHttps : tunnelExports.httpOverHttp;
-            }
-            agent = tunnelAgent(agentOptions);
-            this._proxyAgent = agent;
-        }
-        // if tunneling agent isn't assigned create a new agent
-        if (!agent) {
-            const options = { keepAlive: this._keepAlive, maxSockets };
-            agent = usingSsl ? new https.Agent(options) : new http.Agent(options);
-            this._agent = agent;
-        }
-        if (usingSsl && this._ignoreSslError) {
-            // we don't want to set NODE_TLS_REJECT_UNAUTHORIZED=0 since that will affect request for entire process
-            // http.RequestOptions doesn't expose a way to modify RequestOptions.agent.options
-            // we have to cast it to any and change it directly
-            agent.options = Object.assign(agent.options || {}, {
-                rejectUnauthorized: false
-            });
-        }
-        return agent;
-    }
-    _getProxyAgentDispatcher(parsedUrl, proxyUrl) {
-        let proxyAgent;
-        if (this._keepAlive) {
-            proxyAgent = this._proxyAgentDispatcher;
-        }
-        // if agent is already assigned use that agent.
-        if (proxyAgent) {
-            return proxyAgent;
-        }
-        const usingSsl = parsedUrl.protocol === 'https:';
-        proxyAgent = new undiciExports.ProxyAgent(Object.assign({ uri: proxyUrl.href, pipelining: !this._keepAlive ? 0 : 1 }, ((proxyUrl.username || proxyUrl.password) && {
-            token: `Basic ${Buffer.from(`${proxyUrl.username}:${proxyUrl.password}`).toString('base64')}`
-        })));
-        this._proxyAgentDispatcher = proxyAgent;
-        if (usingSsl && this._ignoreSslError) {
-            // we don't want to set NODE_TLS_REJECT_UNAUTHORIZED=0 since that will affect request for entire process
-            // http.RequestOptions doesn't expose a way to modify RequestOptions.agent.options
-            // we have to cast it to any and change it directly
-            proxyAgent.options = Object.assign(proxyAgent.options.requestTls || {}, {
-                rejectUnauthorized: false
-            });
-        }
-        return proxyAgent;
-    }
-    _getUserAgentWithOrchestrationId(userAgent) {
-        const baseUserAgent = userAgent || 'actions/http-client';
-        const orchId = process.env['ACTIONS_ORCHESTRATION_ID'];
-        if (orchId) {
-            // Sanitize the orchestration ID to ensure it contains only valid characters
-            // Valid characters: 0-9, a-z, _, -, .
-            const sanitizedId = orchId.replace(/[^a-z0-9_.-]/gi, '_');
-            return `${baseUserAgent} actions_orchestration_id/${sanitizedId}`;
-        }
-        return baseUserAgent;
-    }
-    _performExponentialBackoff(retryNumber) {
-        return __awaiter$3(this, void 0, void 0, function* () {
-            retryNumber = Math.min(ExponentialBackoffCeiling, retryNumber);
-            const ms = ExponentialBackoffTimeSlice * Math.pow(2, retryNumber);
-            return new Promise(resolve => setTimeout(() => resolve(), ms));
-        });
-    }
-    _processResponse(res, options) {
-        return __awaiter$3(this, void 0, void 0, function* () {
-            return new Promise((resolve, reject) => __awaiter$3(this, void 0, void 0, function* () {
-                const statusCode = res.message.statusCode || 0;
-                const response = {
-                    statusCode,
-                    result: null,
-                    headers: {}
-                };
-                // not found leads to null obj returned
-                if (statusCode === HttpCodes$1.NotFound) {
-                    resolve(response);
-                }
-                // get the result from the body
-                function dateTimeDeserializer(key, value) {
-                    if (typeof value === 'string') {
-                        const a = new Date(value);
-                        if (!isNaN(a.valueOf())) {
-                            return a;
-                        }
-                    }
-                    return value;
-                }
-                let obj;
-                let contents;
-                try {
-                    contents = yield res.readBody();
-                    if (contents && contents.length > 0) {
-                        if (options && options.deserializeDates) {
-                            obj = JSON.parse(contents, dateTimeDeserializer);
-                        }
-                        else {
-                            obj = JSON.parse(contents);
-                        }
-                        response.result = obj;
-                    }
-                    response.headers = res.message.headers;
-                }
-                catch (err) {
-                    // Invalid resource (contents not json);  leaving result obj null
-                }
-                // note that 3xx redirects are handled by the http layer.
-                if (statusCode > 299) {
-                    let msg;
-                    // if exception/error in body, attempt to get better error
-                    if (obj && obj.message) {
-                        msg = obj.message;
-                    }
-                    else if (contents && contents.length > 0) {
-                        // it may be the case that the exception is in the body message as string
-                        msg = contents;
-                    }
-                    else {
-                        msg = `Failed request: (${statusCode})`;
-                    }
-                    const err = new HttpClientError(msg, statusCode);
-                    err.result = response.result;
-                    reject(err);
-                }
-                else {
-                    resolve(response);
-                }
-            }));
-        });
-    }
-}
-const lowercaseKeys$1 = (obj) => Object.keys(obj).reduce((c, k) => ((c[k.toLowerCase()] = obj[k]), c), {});
 
 var __awaiter$2 = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
@@ -34577,7 +34274,7 @@ function isKeyOperator(operator) {
 function getValues(context, operator, key, modifier) {
   var value = context[key], result = [];
   if (isDefined(value) && value !== "") {
-    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    if (typeof value === "string" || typeof value === "number" || typeof value === "bigint" || typeof value === "boolean") {
       value = value.toString();
       if (modifier && modifier !== "*") {
         value = value.substring(0, parseInt(modifier, 10));
@@ -34943,6 +34640,152 @@ function requireFastContentTypeParse () {
 
 var fastContentTypeParseExports = requireFastContentTypeParse();
 
+const intRegex = /^-?\d+$/;
+const noiseValue = /^-?\d+n+$/; // Noise - strings that match the custom format before being converted to it
+const originalStringify = JSON.stringify;
+const originalParse = JSON.parse;
+const customFormat = /^-?\d+n$/;
+
+const bigIntsStringify = /([\[:])?"(-?\d+)n"($|([\\n]|\s)*(\s|[\\n])*[,\}\]])/g;
+const noiseStringify =
+  /([\[:])?("-?\d+n+)n("$|"([\\n]|\s)*(\s|[\\n])*[,\}\]])/g;
+
+/** @typedef {(key: string, value: any, context?: { source: string }) => any} Reviver */
+
+/**
+ * Function to serialize value to a JSON string.
+ * Converts BigInt values to a custom format (strings with digits and "n" at the end) and then converts them to proper big integers in a JSON string.
+ * @param {*} value - The value to convert to a JSON string.
+ * @param {(Function|Array<string>|null)} [replacer] - A function that alters the behavior of the stringification process, or an array of strings to indicate properties to exclude.
+ * @param {(string|number)} [space] - A string or number to specify indentation or pretty-printing.
+ * @returns {string} The JSON string representation.
+ */
+const JSONStringify = (value, replacer, space) => {
+  if ("rawJSON" in JSON) {
+    return originalStringify(
+      value,
+      (key, value) => {
+        if (typeof value === "bigint") return JSON.rawJSON(value.toString());
+
+        if (Array.isArray(replacer) && replacer.includes(key)) return value;
+
+        return value;
+      },
+      space,
+    );
+  }
+
+  if (!value) return originalStringify(value, replacer, space);
+
+  const convertedToCustomJSON = originalStringify(
+    value,
+    (key, value) => {
+      const isNoise =
+        typeof value === "string" && Boolean(value.match(noiseValue));
+
+      if (isNoise) return value.toString() + "n"; // Mark noise values with additional "n" to offset the deletion of one "n" during the processing
+
+      if (typeof value === "bigint") return value.toString() + "n";
+
+      if (Array.isArray(replacer) && replacer.includes(key)) return value;
+
+      return value;
+    },
+    space,
+  );
+  const processedJSON = convertedToCustomJSON.replace(
+    bigIntsStringify,
+    "$1$2$3",
+  ); // Delete one "n" off the end of every BigInt value
+  const denoisedJSON = processedJSON.replace(noiseStringify, "$1$2$3"); // Remove one "n" off the end of every noisy string
+
+  return denoisedJSON;
+};
+
+/**
+ * Support for JSON.parse's context.source feature detection.
+ * @type {boolean}
+ */
+const isContextSourceSupported = () =>
+  JSON.parse("1", (_, __, context) => !!context && context.source === "1");
+
+/**
+ * Convert marked big numbers to BigInt
+ * @type {Reviver}
+ */
+const convertMarkedBigIntsReviver = (key, value, context, userReviver) => {
+  const isCustomFormatBigInt =
+    typeof value === "string" && value.match(customFormat);
+  if (isCustomFormatBigInt) return BigInt(value.slice(0, -1));
+
+  const isNoiseValue = typeof value === "string" && value.match(noiseValue);
+  if (isNoiseValue) return value.slice(0, -1);
+
+  return value;
+};
+
+/**
+ * Faster (2x) and simpler function to parse JSON.
+ * Based on JSON.parse's context.source feature, which is not universally available now.
+ * Does not support the legacy custom format, used in the first version of this library.
+ */
+const JSONParseV2 = (text, reviver) => {
+  return JSON.parse(text, (key, value, context) => {
+    const isBigNumber =
+      typeof value === "number" &&
+      (value > Number.MAX_SAFE_INTEGER || value < Number.MIN_SAFE_INTEGER);
+    const isInt = context && intRegex.test(context.source);
+    const isBigInt = isBigNumber && isInt;
+
+    if (isBigInt) return BigInt(context.source);
+
+    return value;
+  });
+};
+
+const MAX_INT = Number.MAX_SAFE_INTEGER.toString();
+const MAX_DIGITS = MAX_INT.length;
+const stringsOrLargeNumbers =
+  /"(?:\\.|[^"])*"|-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?/g;
+const noiseValueWithQuotes = /^"-?\d+n+"$/; // Noise - strings that match the custom format before being converted to it
+
+/**
+ * Function to parse JSON.
+ * If JSON has number values greater than Number.MAX_SAFE_INTEGER, we convert those values to a custom format, then parse them to BigInt values.
+ * Other types of values are not affected and parsed as native JSON.parse() would parse them.
+ */
+const JSONParse = (text, reviver) => {
+  if (!text) return originalParse(text, reviver);
+
+  if (isContextSourceSupported()) return JSONParseV2(text); // Shortcut to a faster (2x) and simpler version
+
+  // Find and mark big numbers with "n"
+  const serializedData = text.replace(
+    stringsOrLargeNumbers,
+    (text, digits, fractional, exponential) => {
+      const isString = text[0] === '"';
+      const isNoise = isString && Boolean(text.match(noiseValueWithQuotes));
+
+      if (isNoise) return text.substring(0, text.length - 1) + 'n"'; // Mark noise values with additional "n" to offset the deletion of one "n" during the processing
+
+      const isFractionalOrExponential = fractional || exponential;
+      const isLessThanMaxSafeInt =
+        digits &&
+        (digits.length < MAX_DIGITS ||
+          (digits.length === MAX_DIGITS && digits <= MAX_INT)); // With a fixed number of digits, we can correctly use lexicographical comparison to do a numeric comparison
+
+      if (isString || isFractionalOrExponential || isLessThanMaxSafeInt)
+        return text;
+
+      return '"' + text + 'n"';
+    },
+  );
+
+  return originalParse(serializedData, (key, value, context) =>
+    convertMarkedBigIntsReviver(key, value),
+  );
+};
+
 class RequestError extends Error {
   name;
   /**
@@ -34985,7 +34828,7 @@ class RequestError extends Error {
 // pkg/dist-src/index.js
 
 // pkg/dist-src/version.js
-var VERSION$4 = "10.0.7";
+var VERSION$4 = "10.0.8";
 
 // pkg/dist-src/defaults.js
 var defaults_default = {
@@ -35013,7 +34856,7 @@ async function fetchWrapper(requestOptions) {
   }
   const log = requestOptions.request?.log || console;
   const parseSuccessResponseBody = requestOptions.request?.parseSuccessResponseBody !== false;
-  const body = isPlainObject(requestOptions.body) || Array.isArray(requestOptions.body) ? JSON.stringify(requestOptions.body) : requestOptions.body;
+  const body = isPlainObject(requestOptions.body) || Array.isArray(requestOptions.body) ? JSONStringify(requestOptions.body) : requestOptions.body;
   const requestHeaders = Object.fromEntries(
     Object.entries(requestOptions.headers).map(([name, value]) => [
       name,
@@ -35112,7 +34955,7 @@ async function getResponseData(response) {
     let text = "";
     try {
       text = await response.text();
-      return JSON.parse(text);
+      return JSONParse(text);
     } catch (err) {
       return text;
     }
@@ -38530,6 +38373,8 @@ function requireMinimatch$1 () {
 	  }
 
 	  this.options = options;
+	  this.maxGlobstarRecursion = options.maxGlobstarRecursion !== undefined
+	    ? options.maxGlobstarRecursion : 200;
 	  this.set = [];
 	  this.pattern = pattern;
 	  this.regexp = null;
@@ -38777,6 +38622,9 @@ function requireMinimatch$1 () {
 	          re += c;
 	          continue
 	        }
+
+	        // coalesce consecutive non-globstar * characters
+	        if (c === '*' && stateChar === '*') continue
 
 	        // if we already have a stateChar, then it means
 	        // that there was something like ** or +? in there.
@@ -39172,19 +39020,163 @@ function requireMinimatch$1 () {
 	// out of pattern, then that's fine, as long as all
 	// the parts match.
 	Minimatch.prototype.matchOne = function (file, pattern, partial) {
-	  var options = this.options;
+	  if (pattern.indexOf(GLOBSTAR) !== -1) {
+	    return this._matchGlobstar(file, pattern, partial, 0, 0)
+	  }
+	  return this._matchOne(file, pattern, partial, 0, 0)
+	};
 
-	  this.debug('matchOne',
-	    { 'this': this, file: file, pattern: pattern });
+	Minimatch.prototype._matchGlobstar = function (file, pattern, partial, fileIndex, patternIndex) {
+	  var i;
 
-	  this.debug('matchOne', file.length, pattern.length);
+	  // find first globstar from patternIndex
+	  var firstgs = -1;
+	  for (i = patternIndex; i < pattern.length; i++) {
+	    if (pattern[i] === GLOBSTAR) { firstgs = i; break }
+	  }
 
-	  for (var fi = 0,
-	      pi = 0,
-	      fl = file.length,
-	      pl = pattern.length
-	      ; (fi < fl) && (pi < pl)
-	      ; fi++, pi++) {
+	  // find last globstar
+	  var lastgs = -1;
+	  for (i = pattern.length - 1; i >= 0; i--) {
+	    if (pattern[i] === GLOBSTAR) { lastgs = i; break }
+	  }
+
+	  var head = pattern.slice(patternIndex, firstgs);
+	  var body = partial ? pattern.slice(firstgs + 1) : pattern.slice(firstgs + 1, lastgs);
+	  var tail = partial ? [] : pattern.slice(lastgs + 1);
+
+	  // check the head
+	  if (head.length) {
+	    var fileHead = file.slice(fileIndex, fileIndex + head.length);
+	    if (!this._matchOne(fileHead, head, partial, 0, 0)) {
+	      return false
+	    }
+	    fileIndex += head.length;
+	  }
+
+	  // check the tail
+	  var fileTailMatch = 0;
+	  if (tail.length) {
+	    if (tail.length + fileIndex > file.length) return false
+
+	    var tailStart = file.length - tail.length;
+	    if (this._matchOne(file, tail, partial, tailStart, 0)) {
+	      fileTailMatch = tail.length;
+	    } else {
+	      // affordance for stuff like a/**/* matching a/b/
+	      if (file[file.length - 1] !== '' ||
+	          fileIndex + tail.length === file.length) {
+	        return false
+	      }
+	      tailStart--;
+	      if (!this._matchOne(file, tail, partial, tailStart, 0)) {
+	        return false
+	      }
+	      fileTailMatch = tail.length + 1;
+	    }
+	  }
+
+	  // if body is empty (single ** between head and tail)
+	  if (!body.length) {
+	    var sawSome = !!fileTailMatch;
+	    for (i = fileIndex; i < file.length - fileTailMatch; i++) {
+	      var f = String(file[i]);
+	      sawSome = true;
+	      if (f === '.' || f === '..' ||
+	          (!this.options.dot && f.charAt(0) === '.')) {
+	        return false
+	      }
+	    }
+	    return partial || sawSome
+	  }
+
+	  // split body into segments at each GLOBSTAR
+	  var bodySegments = [[[], 0]];
+	  var currentBody = bodySegments[0];
+	  var nonGsParts = 0;
+	  var nonGsPartsSums = [0];
+	  for (var bi = 0; bi < body.length; bi++) {
+	    var b = body[bi];
+	    if (b === GLOBSTAR) {
+	      nonGsPartsSums.push(nonGsParts);
+	      currentBody = [[], 0];
+	      bodySegments.push(currentBody);
+	    } else {
+	      currentBody[0].push(b);
+	      nonGsParts++;
+	    }
+	  }
+
+	  var idx = bodySegments.length - 1;
+	  var fileLength = file.length - fileTailMatch;
+	  for (var si = 0; si < bodySegments.length; si++) {
+	    bodySegments[si][1] = fileLength -
+	      (nonGsPartsSums[idx--] + bodySegments[si][0].length);
+	  }
+
+	  return !!this._matchGlobStarBodySections(
+	    file, bodySegments, fileIndex, 0, partial, 0, !!fileTailMatch
+	  )
+	};
+
+	// return false for "nope, not matching"
+	// return null for "not matching, cannot keep trying"
+	Minimatch.prototype._matchGlobStarBodySections = function (
+	  file, bodySegments, fileIndex, bodyIndex, partial, globStarDepth, sawTail
+	) {
+	  var bs = bodySegments[bodyIndex];
+	  if (!bs) {
+	    // just make sure there are no bad dots
+	    for (var i = fileIndex; i < file.length; i++) {
+	      sawTail = true;
+	      var f = file[i];
+	      if (f === '.' || f === '..' ||
+	          (!this.options.dot && f.charAt(0) === '.')) {
+	        return false
+	      }
+	    }
+	    return sawTail
+	  }
+
+	  var body = bs[0];
+	  var after = bs[1];
+	  while (fileIndex <= after) {
+	    var m = this._matchOne(
+	      file.slice(0, fileIndex + body.length),
+	      body,
+	      partial,
+	      fileIndex,
+	      0
+	    );
+	    // if limit exceeded, no match. intentional false negative,
+	    // acceptable break in correctness for security.
+	    if (m && globStarDepth < this.maxGlobstarRecursion) {
+	      var sub = this._matchGlobStarBodySections(
+	        file, bodySegments,
+	        fileIndex + body.length, bodyIndex + 1,
+	        partial, globStarDepth + 1, sawTail
+	      );
+	      if (sub !== false) {
+	        return sub
+	      }
+	    }
+	    var f = file[fileIndex];
+	    if (f === '.' || f === '..' ||
+	        (!this.options.dot && f.charAt(0) === '.')) {
+	      return false
+	    }
+	    fileIndex++;
+	  }
+	  return partial || null
+	};
+
+	Minimatch.prototype._matchOne = function (file, pattern, partial, fileIndex, patternIndex) {
+	  var fi, pi, fl, pl;
+	  for (
+	    fi = fileIndex, pi = patternIndex, fl = file.length, pl = pattern.length
+	    ; (fi < fl) && (pi < pl)
+	    ; fi++, pi++
+	  ) {
 	    this.debug('matchOne loop');
 	    var p = pattern[pi];
 	    var f = file[fi];
@@ -39194,87 +39186,7 @@ function requireMinimatch$1 () {
 	    // should be impossible.
 	    // some invalid regexp stuff in the set.
 	    /* istanbul ignore if */
-	    if (p === false) return false
-
-	    if (p === GLOBSTAR) {
-	      this.debug('GLOBSTAR', [pattern, p, f]);
-
-	      // "**"
-	      // a/**/b/**/c would match the following:
-	      // a/b/x/y/z/c
-	      // a/x/y/z/b/c
-	      // a/b/x/b/x/c
-	      // a/b/c
-	      // To do this, take the rest of the pattern after
-	      // the **, and see if it would match the file remainder.
-	      // If so, return success.
-	      // If not, the ** "swallows" a segment, and try again.
-	      // This is recursively awful.
-	      //
-	      // a/**/b/**/c matching a/b/x/y/z/c
-	      // - a matches a
-	      // - doublestar
-	      //   - matchOne(b/x/y/z/c, b/**/c)
-	      //     - b matches b
-	      //     - doublestar
-	      //       - matchOne(x/y/z/c, c) -> no
-	      //       - matchOne(y/z/c, c) -> no
-	      //       - matchOne(z/c, c) -> no
-	      //       - matchOne(c, c) yes, hit
-	      var fr = fi;
-	      var pr = pi + 1;
-	      if (pr === pl) {
-	        this.debug('** at the end');
-	        // a ** at the end will just swallow the rest.
-	        // We have found a match.
-	        // however, it will not swallow /.x, unless
-	        // options.dot is set.
-	        // . and .. are *never* matched by **, for explosively
-	        // exponential reasons.
-	        for (; fi < fl; fi++) {
-	          if (file[fi] === '.' || file[fi] === '..' ||
-	            (!options.dot && file[fi].charAt(0) === '.')) return false
-	        }
-	        return true
-	      }
-
-	      // ok, let's see if we can swallow whatever we can.
-	      while (fr < fl) {
-	        var swallowee = file[fr];
-
-	        this.debug('\nglobstar while', file, fr, pattern, pr, swallowee);
-
-	        // XXX remove this slice.  Just pass the start index.
-	        if (this.matchOne(file.slice(fr), pattern.slice(pr), partial)) {
-	          this.debug('globstar found match!', fr, fl, swallowee);
-	          // found a match.
-	          return true
-	        } else {
-	          // can't swallow "." or ".." ever.
-	          // can only swallow ".foo" when explicitly asked.
-	          if (swallowee === '.' || swallowee === '..' ||
-	            (!options.dot && swallowee.charAt(0) === '.')) {
-	            this.debug('dot detected!', file, fr, pattern, pr);
-	            break
-	          }
-
-	          // ** swallows a segment, and continue.
-	          this.debug('globstar swallow a segment, and continue');
-	          fr++;
-	        }
-	      }
-
-	      // no match was found.
-	      // However, in partial mode, we can't say this is necessarily over.
-	      // If there's more *pattern* left, then
-	      /* istanbul ignore if */
-	      if (partial) {
-	        // ran out of file
-	        this.debug('\n>>> no match, partial?', file, fr, pattern, pr);
-	        if (fr === fl) return true
-	      }
-	      return false
-	    }
+	    if (p === false || p === GLOBSTAR) return false
 
 	    // something other than **
 	    // non-magic patterns just have to match exactly
@@ -39290,17 +39202,6 @@ function requireMinimatch$1 () {
 
 	    if (!hit) return false
 	  }
-
-	  // Note: ending in / means that we'll get a final ""
-	  // at the end of the pattern.  This can only match a
-	  // corresponding "" at the end of the file.
-	  // If the file ends in /, then it can only match a
-	  // a pattern that ends in /, unless the pattern just
-	  // doesn't have any more for it. But, a/b/ should *not*
-	  // match "a/b/*", even though "" matches against the
-	  // [^/]*? pattern, except in partial mode, where it might
-	  // simply not be reached yet.
-	  // However, a/b/ should still satisfy a/*
 
 	  // now either we fell off the end of the pattern, or we're done.
 	  if (fi === fl && pi === pl) {
@@ -43119,236 +43020,6 @@ class ServiceType {
 // @generated from protobuf file "results/api/v1/artifact.proto" (package "github.actions.results.api.v1", syntax proto3)
 // tslint:disable
 // @generated message type with reflection information, may provide speed optimized methods
-class MigrateArtifactRequest$Type extends MessageType {
-    constructor() {
-        super("github.actions.results.api.v1.MigrateArtifactRequest", [
-            { no: 1, name: "workflow_run_backend_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
-            { no: 2, name: "name", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
-            { no: 3, name: "expires_at", kind: "message", T: () => Timestamp }
-        ]);
-    }
-    create(value) {
-        const message = { workflowRunBackendId: "", name: "" };
-        globalThis.Object.defineProperty(message, MESSAGE_TYPE, { enumerable: false, value: this });
-        if (value !== undefined)
-            reflectionMergePartial(this, message, value);
-        return message;
-    }
-    internalBinaryRead(reader, length, options, target) {
-        let message = target !== null && target !== void 0 ? target : this.create(), end = reader.pos + length;
-        while (reader.pos < end) {
-            let [fieldNo, wireType] = reader.tag();
-            switch (fieldNo) {
-                case /* string workflow_run_backend_id */ 1:
-                    message.workflowRunBackendId = reader.string();
-                    break;
-                case /* string name */ 2:
-                    message.name = reader.string();
-                    break;
-                case /* google.protobuf.Timestamp expires_at */ 3:
-                    message.expiresAt = Timestamp.internalBinaryRead(reader, reader.uint32(), options, message.expiresAt);
-                    break;
-                default:
-                    let u = options.readUnknownField;
-                    if (u === "throw")
-                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
-                    let d = reader.skip(wireType);
-                    if (u !== false)
-                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
-            }
-        }
-        return message;
-    }
-    internalBinaryWrite(message, writer, options) {
-        /* string workflow_run_backend_id = 1; */
-        if (message.workflowRunBackendId !== "")
-            writer.tag(1, WireType.LengthDelimited).string(message.workflowRunBackendId);
-        /* string name = 2; */
-        if (message.name !== "")
-            writer.tag(2, WireType.LengthDelimited).string(message.name);
-        /* google.protobuf.Timestamp expires_at = 3; */
-        if (message.expiresAt)
-            Timestamp.internalBinaryWrite(message.expiresAt, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
-        let u = options.writeUnknownFields;
-        if (u !== false)
-            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
-        return writer;
-    }
-}
-/**
- * @generated MessageType for protobuf message github.actions.results.api.v1.MigrateArtifactRequest
- */
-const MigrateArtifactRequest = new MigrateArtifactRequest$Type();
-// @generated message type with reflection information, may provide speed optimized methods
-class MigrateArtifactResponse$Type extends MessageType {
-    constructor() {
-        super("github.actions.results.api.v1.MigrateArtifactResponse", [
-            { no: 1, name: "ok", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
-            { no: 2, name: "signed_upload_url", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
-        ]);
-    }
-    create(value) {
-        const message = { ok: false, signedUploadUrl: "" };
-        globalThis.Object.defineProperty(message, MESSAGE_TYPE, { enumerable: false, value: this });
-        if (value !== undefined)
-            reflectionMergePartial(this, message, value);
-        return message;
-    }
-    internalBinaryRead(reader, length, options, target) {
-        let message = target !== null && target !== void 0 ? target : this.create(), end = reader.pos + length;
-        while (reader.pos < end) {
-            let [fieldNo, wireType] = reader.tag();
-            switch (fieldNo) {
-                case /* bool ok */ 1:
-                    message.ok = reader.bool();
-                    break;
-                case /* string signed_upload_url */ 2:
-                    message.signedUploadUrl = reader.string();
-                    break;
-                default:
-                    let u = options.readUnknownField;
-                    if (u === "throw")
-                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
-                    let d = reader.skip(wireType);
-                    if (u !== false)
-                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
-            }
-        }
-        return message;
-    }
-    internalBinaryWrite(message, writer, options) {
-        /* bool ok = 1; */
-        if (message.ok !== false)
-            writer.tag(1, WireType.Varint).bool(message.ok);
-        /* string signed_upload_url = 2; */
-        if (message.signedUploadUrl !== "")
-            writer.tag(2, WireType.LengthDelimited).string(message.signedUploadUrl);
-        let u = options.writeUnknownFields;
-        if (u !== false)
-            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
-        return writer;
-    }
-}
-/**
- * @generated MessageType for protobuf message github.actions.results.api.v1.MigrateArtifactResponse
- */
-const MigrateArtifactResponse = new MigrateArtifactResponse$Type();
-// @generated message type with reflection information, may provide speed optimized methods
-class FinalizeMigratedArtifactRequest$Type extends MessageType {
-    constructor() {
-        super("github.actions.results.api.v1.FinalizeMigratedArtifactRequest", [
-            { no: 1, name: "workflow_run_backend_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
-            { no: 2, name: "name", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
-            { no: 3, name: "size", kind: "scalar", T: 3 /*ScalarType.INT64*/ }
-        ]);
-    }
-    create(value) {
-        const message = { workflowRunBackendId: "", name: "", size: "0" };
-        globalThis.Object.defineProperty(message, MESSAGE_TYPE, { enumerable: false, value: this });
-        if (value !== undefined)
-            reflectionMergePartial(this, message, value);
-        return message;
-    }
-    internalBinaryRead(reader, length, options, target) {
-        let message = target !== null && target !== void 0 ? target : this.create(), end = reader.pos + length;
-        while (reader.pos < end) {
-            let [fieldNo, wireType] = reader.tag();
-            switch (fieldNo) {
-                case /* string workflow_run_backend_id */ 1:
-                    message.workflowRunBackendId = reader.string();
-                    break;
-                case /* string name */ 2:
-                    message.name = reader.string();
-                    break;
-                case /* int64 size */ 3:
-                    message.size = reader.int64().toString();
-                    break;
-                default:
-                    let u = options.readUnknownField;
-                    if (u === "throw")
-                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
-                    let d = reader.skip(wireType);
-                    if (u !== false)
-                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
-            }
-        }
-        return message;
-    }
-    internalBinaryWrite(message, writer, options) {
-        /* string workflow_run_backend_id = 1; */
-        if (message.workflowRunBackendId !== "")
-            writer.tag(1, WireType.LengthDelimited).string(message.workflowRunBackendId);
-        /* string name = 2; */
-        if (message.name !== "")
-            writer.tag(2, WireType.LengthDelimited).string(message.name);
-        /* int64 size = 3; */
-        if (message.size !== "0")
-            writer.tag(3, WireType.Varint).int64(message.size);
-        let u = options.writeUnknownFields;
-        if (u !== false)
-            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
-        return writer;
-    }
-}
-/**
- * @generated MessageType for protobuf message github.actions.results.api.v1.FinalizeMigratedArtifactRequest
- */
-const FinalizeMigratedArtifactRequest = new FinalizeMigratedArtifactRequest$Type();
-// @generated message type with reflection information, may provide speed optimized methods
-class FinalizeMigratedArtifactResponse$Type extends MessageType {
-    constructor() {
-        super("github.actions.results.api.v1.FinalizeMigratedArtifactResponse", [
-            { no: 1, name: "ok", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
-            { no: 2, name: "artifact_id", kind: "scalar", T: 3 /*ScalarType.INT64*/ }
-        ]);
-    }
-    create(value) {
-        const message = { ok: false, artifactId: "0" };
-        globalThis.Object.defineProperty(message, MESSAGE_TYPE, { enumerable: false, value: this });
-        if (value !== undefined)
-            reflectionMergePartial(this, message, value);
-        return message;
-    }
-    internalBinaryRead(reader, length, options, target) {
-        let message = target !== null && target !== void 0 ? target : this.create(), end = reader.pos + length;
-        while (reader.pos < end) {
-            let [fieldNo, wireType] = reader.tag();
-            switch (fieldNo) {
-                case /* bool ok */ 1:
-                    message.ok = reader.bool();
-                    break;
-                case /* int64 artifact_id */ 2:
-                    message.artifactId = reader.int64().toString();
-                    break;
-                default:
-                    let u = options.readUnknownField;
-                    if (u === "throw")
-                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
-                    let d = reader.skip(wireType);
-                    if (u !== false)
-                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
-            }
-        }
-        return message;
-    }
-    internalBinaryWrite(message, writer, options) {
-        /* bool ok = 1; */
-        if (message.ok !== false)
-            writer.tag(1, WireType.Varint).bool(message.ok);
-        /* int64 artifact_id = 2; */
-        if (message.artifactId !== "0")
-            writer.tag(2, WireType.Varint).int64(message.artifactId);
-        let u = options.writeUnknownFields;
-        if (u !== false)
-            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
-        return writer;
-    }
-}
-/**
- * @generated MessageType for protobuf message github.actions.results.api.v1.FinalizeMigratedArtifactResponse
- */
-const FinalizeMigratedArtifactResponse = new FinalizeMigratedArtifactResponse$Type();
-// @generated message type with reflection information, may provide speed optimized methods
 class CreateArtifactRequest$Type extends MessageType {
     constructor() {
         super("github.actions.results.api.v1.CreateArtifactRequest", [
@@ -43356,7 +43027,8 @@ class CreateArtifactRequest$Type extends MessageType {
             { no: 2, name: "workflow_job_run_backend_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 3, name: "name", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 4, name: "expires_at", kind: "message", T: () => Timestamp },
-            { no: 5, name: "version", kind: "scalar", T: 5 /*ScalarType.INT32*/ }
+            { no: 5, name: "version", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 6, name: "mime_type", kind: "message", T: () => StringValue }
         ]);
     }
     create(value) {
@@ -43386,6 +43058,9 @@ class CreateArtifactRequest$Type extends MessageType {
                 case /* int32 version */ 5:
                     message.version = reader.int32();
                     break;
+                case /* google.protobuf.StringValue mime_type */ 6:
+                    message.mimeType = StringValue.internalBinaryRead(reader, reader.uint32(), options, message.mimeType);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -43413,6 +43088,9 @@ class CreateArtifactRequest$Type extends MessageType {
         /* int32 version = 5; */
         if (message.version !== 0)
             writer.tag(5, WireType.Varint).int32(message.version);
+        /* google.protobuf.StringValue mime_type = 6; */
+        if (message.mimeType)
+            StringValue.internalBinaryWrite(message.mimeType, writer.tag(6, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -43678,7 +43356,7 @@ const ListArtifactsRequest = new ListArtifactsRequest$Type();
 class ListArtifactsResponse$Type extends MessageType {
     constructor() {
         super("github.actions.results.api.v1.ListArtifactsResponse", [
-            { no: 1, name: "artifacts", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => ListArtifactsResponse_MonolithArtifact }
+            { no: 1, name: "artifacts", kind: "message", repeat: 2 /*RepeatType.UNPACKED*/, T: () => ListArtifactsResponse_MonolithArtifact }
         ]);
     }
     create(value) {
@@ -44041,9 +43719,7 @@ new ServiceType("github.actions.results.api.v1.ArtifactService", [
     { name: "FinalizeArtifact", options: {}, I: FinalizeArtifactRequest, O: FinalizeArtifactResponse },
     { name: "ListArtifacts", options: {}, I: ListArtifactsRequest, O: ListArtifactsResponse },
     { name: "GetSignedArtifactURL", options: {}, I: GetSignedArtifactURLRequest, O: GetSignedArtifactURLResponse },
-    { name: "DeleteArtifact", options: {}, I: DeleteArtifactRequest, O: DeleteArtifactResponse },
-    { name: "MigrateArtifact", options: {}, I: MigrateArtifactRequest, O: MigrateArtifactResponse },
-    { name: "FinalizeMigratedArtifact", options: {}, I: FinalizeMigratedArtifactRequest, O: FinalizeMigratedArtifactResponse }
+    { name: "DeleteArtifact", options: {}, I: DeleteArtifactRequest, O: DeleteArtifactResponse }
 ]);
 
 /**
@@ -44070,78 +43746,6 @@ new Map([
     ['\\', ' Backslash \\'],
     ['/', ' Forward slash /']
 ]);
-
-/* eslint-disable @typescript-eslint/no-explicit-any */
-(undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
-    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
-    return new (P || (P = Promise))(function (resolve, reject) {
-        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
-        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
-        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
-        step((generator = generator.apply(thisArg, _arguments || [])).next());
-    });
-};
-var HttpCodes;
-(function (HttpCodes) {
-    HttpCodes[HttpCodes["OK"] = 200] = "OK";
-    HttpCodes[HttpCodes["MultipleChoices"] = 300] = "MultipleChoices";
-    HttpCodes[HttpCodes["MovedPermanently"] = 301] = "MovedPermanently";
-    HttpCodes[HttpCodes["ResourceMoved"] = 302] = "ResourceMoved";
-    HttpCodes[HttpCodes["SeeOther"] = 303] = "SeeOther";
-    HttpCodes[HttpCodes["NotModified"] = 304] = "NotModified";
-    HttpCodes[HttpCodes["UseProxy"] = 305] = "UseProxy";
-    HttpCodes[HttpCodes["SwitchProxy"] = 306] = "SwitchProxy";
-    HttpCodes[HttpCodes["TemporaryRedirect"] = 307] = "TemporaryRedirect";
-    HttpCodes[HttpCodes["PermanentRedirect"] = 308] = "PermanentRedirect";
-    HttpCodes[HttpCodes["BadRequest"] = 400] = "BadRequest";
-    HttpCodes[HttpCodes["Unauthorized"] = 401] = "Unauthorized";
-    HttpCodes[HttpCodes["PaymentRequired"] = 402] = "PaymentRequired";
-    HttpCodes[HttpCodes["Forbidden"] = 403] = "Forbidden";
-    HttpCodes[HttpCodes["NotFound"] = 404] = "NotFound";
-    HttpCodes[HttpCodes["MethodNotAllowed"] = 405] = "MethodNotAllowed";
-    HttpCodes[HttpCodes["NotAcceptable"] = 406] = "NotAcceptable";
-    HttpCodes[HttpCodes["ProxyAuthenticationRequired"] = 407] = "ProxyAuthenticationRequired";
-    HttpCodes[HttpCodes["RequestTimeout"] = 408] = "RequestTimeout";
-    HttpCodes[HttpCodes["Conflict"] = 409] = "Conflict";
-    HttpCodes[HttpCodes["Gone"] = 410] = "Gone";
-    HttpCodes[HttpCodes["TooManyRequests"] = 429] = "TooManyRequests";
-    HttpCodes[HttpCodes["InternalServerError"] = 500] = "InternalServerError";
-    HttpCodes[HttpCodes["NotImplemented"] = 501] = "NotImplemented";
-    HttpCodes[HttpCodes["BadGateway"] = 502] = "BadGateway";
-    HttpCodes[HttpCodes["ServiceUnavailable"] = 503] = "ServiceUnavailable";
-    HttpCodes[HttpCodes["GatewayTimeout"] = 504] = "GatewayTimeout";
-})(HttpCodes || (HttpCodes = {}));
-var Headers;
-(function (Headers) {
-    Headers["Accept"] = "accept";
-    Headers["ContentType"] = "content-type";
-})(Headers || (Headers = {}));
-var MediaTypes;
-(function (MediaTypes) {
-    MediaTypes["ApplicationJson"] = "application/json";
-})(MediaTypes || (MediaTypes = {}));
-[
-    HttpCodes.MovedPermanently,
-    HttpCodes.ResourceMoved,
-    HttpCodes.SeeOther,
-    HttpCodes.TemporaryRedirect,
-    HttpCodes.PermanentRedirect
-];
-[
-    HttpCodes.BadGateway,
-    HttpCodes.ServiceUnavailable,
-    HttpCodes.GatewayTimeout
-];
-
-(undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
-    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
-    return new (P || (P = Promise))(function (resolve, reject) {
-        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
-        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
-        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
-        step((generator = generator.apply(thisArg, _arguments || [])).next());
-    });
-};
 
 class NetworkError extends Error {
     constructor(code) {
@@ -44599,6 +44203,8 @@ function requireMinimatch () {
 	    if (!options) options = {};
 
 	    this.options = options;
+	    this.maxGlobstarRecursion = options.maxGlobstarRecursion !== undefined
+	      ? options.maxGlobstarRecursion : 200;
 	    this.set = [];
 	    this.pattern = pattern;
 	    this.windowsPathsNoEscape = !!options.windowsPathsNoEscape ||
@@ -44686,114 +44292,172 @@ function requireMinimatch () {
 	  // out of pattern, then that's fine, as long as all
 	  // the parts match.
 	  matchOne (file, pattern, partial) {
-	    var options = this.options;
+	    if (pattern.indexOf(GLOBSTAR) !== -1) {
+	      return this._matchGlobstar(file, pattern, partial, 0, 0)
+	    }
+	    return this._matchOne(file, pattern, partial, 0, 0)
+	  }
 
-	    this.debug('matchOne',
-	      { 'this': this, file: file, pattern: pattern });
+	  _matchGlobstar (file, pattern, partial, fileIndex, patternIndex) {
+	    // find first globstar from patternIndex
+	    let firstgs = -1;
+	    for (let i = patternIndex; i < pattern.length; i++) {
+	      if (pattern[i] === GLOBSTAR) { firstgs = i; break }
+	    }
 
-	    this.debug('matchOne', file.length, pattern.length);
+	    // find last globstar
+	    let lastgs = -1;
+	    for (let i = pattern.length - 1; i >= 0; i--) {
+	      if (pattern[i] === GLOBSTAR) { lastgs = i; break }
+	    }
 
-	    for (var fi = 0,
-	        pi = 0,
-	        fl = file.length,
-	        pl = pattern.length
-	        ; (fi < fl) && (pi < pl)
-	        ; fi++, pi++) {
+	    const head = pattern.slice(patternIndex, firstgs);
+	    const body = partial ? pattern.slice(firstgs + 1) : pattern.slice(firstgs + 1, lastgs);
+	    const tail = partial ? [] : pattern.slice(lastgs + 1);
+
+	    // check the head
+	    if (head.length) {
+	      const fileHead = file.slice(fileIndex, fileIndex + head.length);
+	      if (!this._matchOne(fileHead, head, partial, 0, 0)) {
+	        return false
+	      }
+	      fileIndex += head.length;
+	    }
+
+	    // check the tail
+	    let fileTailMatch = 0;
+	    if (tail.length) {
+	      if (tail.length + fileIndex > file.length) return false
+
+	      const tailStart = file.length - tail.length;
+	      if (this._matchOne(file, tail, partial, tailStart, 0)) {
+	        fileTailMatch = tail.length;
+	      } else {
+	        // affordance for stuff like a/**/* matching a/b/
+	        if (file[file.length - 1] !== '' ||
+	            fileIndex + tail.length === file.length) {
+	          return false
+	        }
+	        if (!this._matchOne(file, tail, partial, tailStart - 1, 0)) {
+	          return false
+	        }
+	        fileTailMatch = tail.length + 1;
+	      }
+	    }
+
+	    // if body is empty (single ** between head and tail)
+	    if (!body.length) {
+	      let sawSome = !!fileTailMatch;
+	      for (let i = fileIndex; i < file.length - fileTailMatch; i++) {
+	        const f = String(file[i]);
+	        sawSome = true;
+	        if (f === '.' || f === '..' ||
+	            (!this.options.dot && f.charAt(0) === '.')) {
+	          return false
+	        }
+	      }
+	      return partial || sawSome
+	    }
+
+	    // split body into segments at each GLOBSTAR
+	    const bodySegments = [[[], 0]];
+	    let currentBody = bodySegments[0];
+	    let nonGsParts = 0;
+	    const nonGsPartsSums = [0];
+	    for (const b of body) {
+	      if (b === GLOBSTAR) {
+	        nonGsPartsSums.push(nonGsParts);
+	        currentBody = [[], 0];
+	        bodySegments.push(currentBody);
+	      } else {
+	        currentBody[0].push(b);
+	        nonGsParts++;
+	      }
+	    }
+
+	    let idx = bodySegments.length - 1;
+	    const fileLength = file.length - fileTailMatch;
+	    for (const b of bodySegments) {
+	      b[1] = fileLength - (nonGsPartsSums[idx--] + b[0].length);
+	    }
+
+	    return !!this._matchGlobStarBodySections(
+	      file, bodySegments, fileIndex, 0, partial, 0, !!fileTailMatch
+	    )
+	  }
+
+	  // return false for "nope, not matching"
+	  // return null for "not matching, cannot keep trying"
+	  _matchGlobStarBodySections (
+	    file, bodySegments, fileIndex, bodyIndex, partial, globStarDepth, sawTail
+	  ) {
+	    const bs = bodySegments[bodyIndex];
+	    if (!bs) {
+	      // just make sure there are no bad dots
+	      for (let i = fileIndex; i < file.length; i++) {
+	        sawTail = true;
+	        const f = file[i];
+	        if (f === '.' || f === '..' ||
+	            (!this.options.dot && f.charAt(0) === '.')) {
+	          return false
+	        }
+	      }
+	      return sawTail
+	    }
+
+	    const [body, after] = bs;
+	    while (fileIndex <= after) {
+	      const m = this._matchOne(
+	        file.slice(0, fileIndex + body.length),
+	        body,
+	        partial,
+	        fileIndex,
+	        0
+	      );
+	      // if limit exceeded, no match. intentional false negative,
+	      // acceptable break in correctness for security.
+	      if (m && globStarDepth < this.maxGlobstarRecursion) {
+	        const sub = this._matchGlobStarBodySections(
+	          file, bodySegments,
+	          fileIndex + body.length, bodyIndex + 1,
+	          partial, globStarDepth + 1, sawTail
+	        );
+	        if (sub !== false) {
+	          return sub
+	        }
+	      }
+	      const f = file[fileIndex];
+	      if (f === '.' || f === '..' ||
+	          (!this.options.dot && f.charAt(0) === '.')) {
+	        return false
+	      }
+	      fileIndex++;
+	    }
+	    return partial || null
+	  }
+
+	  _matchOne (file, pattern, partial, fileIndex, patternIndex) {
+	    let fi, pi, fl, pl;
+	    for (
+	      fi = fileIndex, pi = patternIndex, fl = file.length, pl = pattern.length
+	      ; (fi < fl) && (pi < pl)
+	      ; fi++, pi++
+	    ) {
 	      this.debug('matchOne loop');
-	      var p = pattern[pi];
-	      var f = file[fi];
+	      const p = pattern[pi];
+	      const f = file[fi];
 
 	      this.debug(pattern, p, f);
 
 	      // should be impossible.
 	      // some invalid regexp stuff in the set.
 	      /* istanbul ignore if */
-	      if (p === false) return false
-
-	      if (p === GLOBSTAR) {
-	        this.debug('GLOBSTAR', [pattern, p, f]);
-
-	        // "**"
-	        // a/**/b/**/c would match the following:
-	        // a/b/x/y/z/c
-	        // a/x/y/z/b/c
-	        // a/b/x/b/x/c
-	        // a/b/c
-	        // To do this, take the rest of the pattern after
-	        // the **, and see if it would match the file remainder.
-	        // If so, return success.
-	        // If not, the ** "swallows" a segment, and try again.
-	        // This is recursively awful.
-	        //
-	        // a/**/b/**/c matching a/b/x/y/z/c
-	        // - a matches a
-	        // - doublestar
-	        //   - matchOne(b/x/y/z/c, b/**/c)
-	        //     - b matches b
-	        //     - doublestar
-	        //       - matchOne(x/y/z/c, c) -> no
-	        //       - matchOne(y/z/c, c) -> no
-	        //       - matchOne(z/c, c) -> no
-	        //       - matchOne(c, c) yes, hit
-	        var fr = fi;
-	        var pr = pi + 1;
-	        if (pr === pl) {
-	          this.debug('** at the end');
-	          // a ** at the end will just swallow the rest.
-	          // We have found a match.
-	          // however, it will not swallow /.x, unless
-	          // options.dot is set.
-	          // . and .. are *never* matched by **, for explosively
-	          // exponential reasons.
-	          for (; fi < fl; fi++) {
-	            if (file[fi] === '.' || file[fi] === '..' ||
-	              (!options.dot && file[fi].charAt(0) === '.')) return false
-	          }
-	          return true
-	        }
-
-	        // ok, let's see if we can swallow whatever we can.
-	        while (fr < fl) {
-	          var swallowee = file[fr];
-
-	          this.debug('\nglobstar while', file, fr, pattern, pr, swallowee);
-
-	          // XXX remove this slice.  Just pass the start index.
-	          if (this.matchOne(file.slice(fr), pattern.slice(pr), partial)) {
-	            this.debug('globstar found match!', fr, fl, swallowee);
-	            // found a match.
-	            return true
-	          } else {
-	            // can't swallow "." or ".." ever.
-	            // can only swallow ".foo" when explicitly asked.
-	            if (swallowee === '.' || swallowee === '..' ||
-	              (!options.dot && swallowee.charAt(0) === '.')) {
-	              this.debug('dot detected!', file, fr, pattern, pr);
-	              break
-	            }
-
-	            // ** swallows a segment, and continue.
-	            this.debug('globstar swallow a segment, and continue');
-	            fr++;
-	          }
-	        }
-
-	        // no match was found.
-	        // However, in partial mode, we can't say this is necessarily over.
-	        // If there's more *pattern* left, then
-	        /* istanbul ignore if */
-	        if (partial) {
-	          // ran out of file
-	          this.debug('\n>>> no match, partial?', file, fr, pattern, pr);
-	          if (fr === fl) return true
-	        }
-	        return false
-	      }
+	      if (p === false || p === GLOBSTAR) return false
 
 	      // something other than **
 	      // non-magic patterns just have to match exactly
 	      // patterns with magic have been turned into regexps.
-	      var hit;
+	      let hit;
 	      if (typeof p === 'string') {
 	        hit = f === p;
 	        this.debug('string match', p, f, hit);
@@ -44804,17 +44468,6 @@ function requireMinimatch () {
 
 	      if (!hit) return false
 	    }
-
-	    // Note: ending in / means that we'll get a final ""
-	    // at the end of the pattern.  This can only match a
-	    // corresponding "" at the end of the file.
-	    // If the file ends in /, then it can only match a
-	    // a pattern that ends in /, unless the pattern just
-	    // doesn't have any more for it. But, a/b/ should *not*
-	    // match "a/b/*", even though "" matches against the
-	    // [^/]*? pattern, except in partial mode, where it might
-	    // simply not be reached yet.
-	    // However, a/b/ should still satisfy a/*
 
 	    // now either we fell off the end of the pattern, or we're done.
 	    if (fi === fl && pi === pl) {
@@ -44963,6 +44616,9 @@ function requireMinimatch () {
 	            re += c;
 	            continue
 	          }
+
+	          // coalesce consecutive non-globstar * characters
+	          if (c === '*' && stateChar === '*') continue
 
 	          // if we already have a stateChar, then it means
 	          // that there was something like ** or +? in there.
@@ -67471,12 +67127,39 @@ function requireAst () {
 	if (hasRequiredAst) return ast;
 	hasRequiredAst = 1;
 	// parse a single path portion
+	var _a;
 	Object.defineProperty(ast, "__esModule", { value: true });
 	ast.AST = void 0;
 	const brace_expressions_js_1 = requireBraceExpressions();
 	const unescape_js_1 = require_unescape();
 	const types = new Set(['!', '?', '+', '*', '@']);
 	const isExtglobType = (c) => types.has(c);
+	const isExtglobAST = (c) => isExtglobType(c.type);
+	const adoptionMap = new Map([
+	    ['!', ['@']],
+	    ['?', ['?', '@']],
+	    ['@', ['@']],
+	    ['*', ['*', '+', '?', '@']],
+	    ['+', ['+', '@']],
+	]);
+	const adoptionWithSpaceMap = new Map([
+	    ['!', ['?']],
+	    ['@', ['?']],
+	    ['+', ['?', '*']],
+	]);
+	const adoptionAnyMap = new Map([
+	    ['!', ['?', '@']],
+	    ['?', ['?', '@']],
+	    ['@', ['?', '@']],
+	    ['*', ['*', '+', '?', '@']],
+	    ['+', ['+', '@', '?', '*']],
+	]);
+	const usurpMap = new Map([
+	    ['!', new Map([['!', '@']])],
+	    ['?', new Map([['*', '*'], ['+', '*']])],
+	    ['@', new Map([['!', '!'], ['?', '?'], ['@', '@'], ['*', '*'], ['+', '+']])],
+	    ['+', new Map([['?', '*'], ['*', '*']])],
+	]);
 	// Patterns that get prepended to bind to the start of either the
 	// entire string, or just a single path portion, to prevent dots
 	// and/or traversal patterns, when needed.
@@ -67593,7 +67276,7 @@ function requireAst () {
 	            if (p === '')
 	                continue;
 	            /* c8 ignore start */
-	            if (typeof p !== 'string' && !(p instanceof AST && p.#parent === this)) {
+	            if (typeof p !== 'string' && !(p instanceof _a && p.#parent === this)) {
 	                throw new Error('invalid part: ' + p);
 	            }
 	            /* c8 ignore stop */
@@ -67625,7 +67308,7 @@ function requireAst () {
 	        const p = this.#parent;
 	        for (let i = 0; i < this.#parentIndex; i++) {
 	            const pp = p.#parts[i];
-	            if (!(pp instanceof AST && pp.type === '!')) {
+	            if (!(pp instanceof _a && pp.type === '!')) {
 	                return false;
 	            }
 	        }
@@ -67653,13 +67336,14 @@ function requireAst () {
 	            this.push(part.clone(this));
 	    }
 	    clone(parent) {
-	        const c = new AST(this.type, parent);
+	        const c = new _a(this.type, parent);
 	        for (const p of this.#parts) {
 	            c.copyIn(p);
 	        }
 	        return c;
 	    }
-	    static #parseAST(str, ast, pos, opt) {
+	    static #parseAST(str, ast, pos, opt, extDepth) {
+	        const maxDepth = opt.maxExtglobRecursion ?? 2;
 	        let escaping = false;
 	        let inBrace = false;
 	        let braceStart = -1;
@@ -67696,11 +67380,15 @@ function requireAst () {
 	                    acc += c;
 	                    continue;
 	                }
-	                if (!opt.noext && isExtglobType(c) && str.charAt(i) === '(') {
+	                const doRecurse = !opt.noext &&
+	                    isExtglobType(c) &&
+	                    str.charAt(i) === '(' &&
+	                    extDepth <= maxDepth;
+	                if (doRecurse) {
 	                    ast.push(acc);
 	                    acc = '';
-	                    const ext = new AST(c, ast);
-	                    i = AST.#parseAST(str, ext, i, opt);
+	                    const ext = new _a(c, ast);
+	                    i = _a.#parseAST(str, ext, i, opt, extDepth + 1);
 	                    ast.push(ext);
 	                    continue;
 	                }
@@ -67712,7 +67400,7 @@ function requireAst () {
 	        // some kind of extglob, pos is at the (
 	        // find the next | or )
 	        let i = pos + 1;
-	        let part = new AST(null, ast);
+	        let part = new _a(null, ast);
 	        const parts = [];
 	        let acc = '';
 	        while (i < str.length) {
@@ -67743,19 +67431,25 @@ function requireAst () {
 	                acc += c;
 	                continue;
 	            }
-	            if (isExtglobType(c) && str.charAt(i) === '(') {
+	            const doRecurse = isExtglobType(c) &&
+	                str.charAt(i) === '(' &&
+	                /* c8 ignore start - the maxDepth is sufficient here */
+	                (extDepth <= maxDepth || (ast && ast.#canAdoptType(c)));
+	            /* c8 ignore stop */
+	            if (doRecurse) {
+	                const depthAdd = ast && ast.#canAdoptType(c) ? 0 : 1;
 	                part.push(acc);
 	                acc = '';
-	                const ext = new AST(c, part);
+	                const ext = new _a(c, part);
 	                part.push(ext);
-	                i = AST.#parseAST(str, ext, i, opt);
+	                i = _a.#parseAST(str, ext, i, opt, extDepth + depthAdd);
 	                continue;
 	            }
 	            if (c === '|') {
 	                part.push(acc);
 	                acc = '';
 	                parts.push(part);
-	                part = new AST(null, ast);
+	                part = new _a(null, ast);
 	                continue;
 	            }
 	            if (c === ')') {
@@ -67777,9 +67471,115 @@ function requireAst () {
 	        ast.#parts = [str.substring(pos - 1)];
 	        return i;
 	    }
+	    #canAdoptWithSpace(child) {
+	        return this.#canAdopt(child, adoptionWithSpaceMap);
+	    }
+	    #canAdopt(child, map = adoptionMap) {
+	        if (!child ||
+	            typeof child !== 'object' ||
+	            child.type !== null ||
+	            child.#parts.length !== 1 ||
+	            this.type === null) {
+	            return false;
+	        }
+	        const gc = child.#parts[0];
+	        if (!gc || typeof gc !== 'object' || gc.type === null) {
+	            return false;
+	        }
+	        return this.#canAdoptType(gc.type, map);
+	    }
+	    #canAdoptType(c, map = adoptionAnyMap) {
+	        return !!map.get(this.type)?.includes(c);
+	    }
+	    #adoptWithSpace(child, index) {
+	        const gc = child.#parts[0];
+	        const blank = new _a(null, gc, this.options);
+	        blank.#parts.push('');
+	        gc.push(blank);
+	        this.#adopt(child, index);
+	    }
+	    #adopt(child, index) {
+	        const gc = child.#parts[0];
+	        this.#parts.splice(index, 1, ...gc.#parts);
+	        for (const p of gc.#parts) {
+	            if (typeof p === 'object')
+	                p.#parent = this;
+	        }
+	        this.#toString = undefined;
+	    }
+	    #canUsurpType(c) {
+	        const m = usurpMap.get(this.type);
+	        return !!(m?.has(c));
+	    }
+	    #canUsurp(child) {
+	        if (!child ||
+	            typeof child !== 'object' ||
+	            child.type !== null ||
+	            child.#parts.length !== 1 ||
+	            this.type === null ||
+	            this.#parts.length !== 1) {
+	            return false;
+	        }
+	        const gc = child.#parts[0];
+	        if (!gc || typeof gc !== 'object' || gc.type === null) {
+	            return false;
+	        }
+	        return this.#canUsurpType(gc.type);
+	    }
+	    #usurp(child) {
+	        const m = usurpMap.get(this.type);
+	        const gc = child.#parts[0];
+	        const nt = m?.get(gc.type);
+	        /* c8 ignore start - impossible */
+	        if (!nt)
+	            return false;
+	        /* c8 ignore stop */
+	        this.#parts = gc.#parts;
+	        for (const p of this.#parts) {
+	            if (typeof p === 'object')
+	                p.#parent = this;
+	        }
+	        this.type = nt;
+	        this.#toString = undefined;
+	        this.#emptyExt = false;
+	    }
+	    #flatten() {
+	        if (!isExtglobAST(this)) {
+	            for (const p of this.#parts) {
+	                if (typeof p === 'object')
+	                    p.#flatten();
+	            }
+	        }
+	        else {
+	            let iterations = 0;
+	            let done = false;
+	            do {
+	                done = true;
+	                for (let i = 0; i < this.#parts.length; i++) {
+	                    const c = this.#parts[i];
+	                    if (typeof c === 'object') {
+	                        c.#flatten();
+	                        if (this.#canAdopt(c)) {
+	                            done = false;
+	                            this.#adopt(c, i);
+	                        }
+	                        else if (this.#canAdoptWithSpace(c)) {
+	                            done = false;
+	                            this.#adoptWithSpace(c, i);
+	                        }
+	                        else if (this.#canUsurp(c)) {
+	                            done = false;
+	                            this.#usurp(c);
+	                        }
+	                    }
+	                }
+	            } while (!done && ++iterations < 10);
+	        }
+	        this.#toString = undefined;
+	    }
 	    static fromGlob(pattern, options = {}) {
-	        const ast = new AST(null, undefined, options);
-	        AST.#parseAST(pattern, ast, 0, options);
+	        const ast = new _a(null, undefined, options);
+	        _a.#parseAST(pattern, ast, 0, options, 0);
 	        return ast;
 	    }
 	    // returns the regular expression if there's magic, or the unescaped
@@ -67883,14 +67683,16 @@ function requireAst () {
 	    // or start or whatever) and prepend ^ or / at the Regexp construction.
 	    toRegExpSource(allowDot) {
 	        const dot = allowDot ?? !!this.#options.dot;
-	        if (this.#root === this)
+	        if (this.#root === this) {
+	            this.#flatten();
 	            this.#fillNegs();
-	        if (!this.type) {
+	        }
+	        if (!isExtglobAST(this)) {
 	            const noEmpty = this.isStart() && this.isEnd();
 	            const src = this.#parts
 	                .map(p => {
 	                const [re, _, hasMagic, uflag] = typeof p === 'string'
-	                    ? AST.#parseGlob(p, this.#hasMagic, noEmpty)
+	                    ? _a.#parseGlob(p, this.#hasMagic, noEmpty)
 	                    : p.toRegExpSource(allowDot);
 	                this.#hasMagic = this.#hasMagic || hasMagic;
 	                this.#uflag = this.#uflag || uflag;
@@ -67949,9 +67751,10 @@ function requireAst () {
 	            // invalid extglob, has to at least be *something* present, if it's
 	            // the entire path portion.
 	            const s = this.toString();
-	            this.#parts = [s];
-	            this.type = null;
-	            this.#hasMagic = undefined;
+	            const me = this;
+	            me.#parts = [s];
+	            me.type = null;
+	            me.#hasMagic = undefined;
 	            return [s, (0, unescape_js_1.unescape)(this.toString()), false, false];
 	        }
 	        // XXX abstract out this map method
@@ -68015,11 +67818,14 @@ function requireAst () {
 	        let escaping = false;
 	        let re = '';
 	        let uflag = false;
+	        // multiple stars that aren't globstars coalesce into one *
+	        let inStar = false;
 	        for (let i = 0; i < glob.length; i++) {
 	            const c = glob.charAt(i);
 	            if (escaping) {
 	                escaping = false;
 	                re += (reSpecials.has(c) ? '\\' : '') + c;
+	                inStar = false;
 	                continue;
 	            }
 	            if (c === '\\') {
@@ -68038,16 +67844,20 @@ function requireAst () {
 	                    uflag = uflag || needUflag;
 	                    i += consumed - 1;
 	                    hasMagic = hasMagic || magic;
+	                    inStar = false;
 	                    continue;
 	                }
 	            }
 	            if (c === '*') {
-	                if (noEmpty && glob === '*')
-	                    re += starNoEmpty;
-	                else
-	                    re += star;
+	                if (inStar)
+	                    continue;
+	                inStar = true;
+	                re += noEmpty && /^[*]+$/.test(glob) ? starNoEmpty : star;
 	                hasMagic = true;
 	                continue;
+	            }
+	            else {
+	                inStar = false;
 	            }
 	            if (c === '?') {
 	                re += qmark;
@@ -68060,6 +67870,7 @@ function requireAst () {
 	    }
 	}
 	ast.AST = AST;
+	_a = AST;
 	
 	return ast;
 }
@@ -68307,11 +68118,13 @@ function requireCommonjs$4 () {
 		    isWindows;
 		    platform;
 		    windowsNoMagicRoot;
+		    maxGlobstarRecursion;
 		    regexp;
 		    constructor(pattern, options = {}) {
 		        (0, assert_valid_pattern_js_1.assertValidPattern)(pattern);
 		        options = options || {};
 		        this.options = options;
+		        this.maxGlobstarRecursion = options.maxGlobstarRecursion ?? 200;
 		        this.pattern = pattern;
 		        this.platform = options.platform || defaultPlatform;
 		        this.isWindows = this.platform === 'win32';
@@ -68711,7 +68524,8 @@ function requireCommonjs$4 () {
 		    // out of pattern, then that's fine, as long as all
 		    // the parts match.
 		    matchOne(file, pattern, partial = false) {
-		        const options = this.options;
+		        let fileStartIndex = 0;
+		        let patternStartIndex = 0;
 		        // UNC paths like //?/X:/... can match X:/... and vice versa
 		        // Drive letters in absolute drive or unc paths are always compared
 		        // case-insensitively.
@@ -68732,15 +68546,14 @@ function requireCommonjs$4 () {
 		            const fdi = fileUNC ? 3 : fileDrive ? 0 : undefined;
 		            const pdi = patternUNC ? 3 : patternDrive ? 0 : undefined;
 		            if (typeof fdi === 'number' && typeof pdi === 'number') {
-		                const [fd, pd] = [file[fdi], pattern[pdi]];
+		                const [fd, pd] = [
+		                    file[fdi],
+		                    pattern[pdi],
+		                ];
 		                if (fd.toLowerCase() === pd.toLowerCase()) {
 		                    pattern[pdi] = fd;
-		                    if (pdi > fdi) {
-		                        pattern = pattern.slice(pdi);
-		                    }
-		                    else if (fdi > pdi) {
-		                        file = file.slice(fdi);
-		                    }
+		                    patternStartIndex = pdi;
+		                    fileStartIndex = fdi;
 		                }
 		            }
 		        }
@@ -68750,102 +68563,127 @@ function requireCommonjs$4 () {
 		        if (optimizationLevel >= 2) {
 		            file = this.levelTwoFileOptimize(file);
 		        }
-		        this.debug('matchOne', this, { file, pattern });
-		        this.debug('matchOne', file.length, pattern.length);
-		        for (var fi = 0, pi = 0, fl = file.length, pl = pattern.length; fi < fl && pi < pl; fi++, pi++) {
+		        if (pattern.includes(exports$1.GLOBSTAR)) {
+		            return this.#matchGlobstar(file, pattern, partial, fileStartIndex, patternStartIndex);
+		        }
+		        return this.#matchOne(file, pattern, partial, fileStartIndex, patternStartIndex);
+		    }
+		    #matchGlobstar(file, pattern, partial, fileIndex, patternIndex) {
+		        const firstgs = pattern.indexOf(exports$1.GLOBSTAR, patternIndex);
+		        const lastgs = pattern.lastIndexOf(exports$1.GLOBSTAR);
+		        const [head, body, tail] = partial ? [
+		            pattern.slice(patternIndex, firstgs),
+		            pattern.slice(firstgs + 1),
+		            [],
+		        ] : [
+		            pattern.slice(patternIndex, firstgs),
+		            pattern.slice(firstgs + 1, lastgs),
+		            pattern.slice(lastgs + 1),
+		        ];
+		        if (head.length) {
+		            const fileHead = file.slice(fileIndex, fileIndex + head.length);
+		            if (!this.#matchOne(fileHead, head, partial, 0, 0))
+		                return false;
+		            fileIndex += head.length;
+		        }
+		        let fileTailMatch = 0;
+		        if (tail.length) {
+		            if (tail.length + fileIndex > file.length)
+		                return false;
+		            let tailStart = file.length - tail.length;
+		            if (this.#matchOne(file, tail, partial, tailStart, 0)) {
+		                fileTailMatch = tail.length;
+		            }
+		            else {
+		                if (file[file.length - 1] !== '' ||
+		                    fileIndex + tail.length === file.length) {
+		                    return false;
+		                }
+		                tailStart--;
+		                if (!this.#matchOne(file, tail, partial, tailStart, 0))
+		                    return false;
+		                fileTailMatch = tail.length + 1;
+		            }
+		        }
+		        if (!body.length) {
+		            let sawSome = !!fileTailMatch;
+		            for (let i = fileIndex; i < file.length - fileTailMatch; i++) {
+		                const f = String(file[i]);
+		                sawSome = true;
+		                if (f === '.' || f === '..' ||
+		                    (!this.options.dot && f.startsWith('.'))) {
+		                    return false;
+		                }
+		            }
+		            return partial || sawSome;
+		        }
+		        const bodySegments = [[[], 0]];
+		        let currentBody = bodySegments[0];
+		        let nonGsParts = 0;
+		        const nonGsPartsSums = [0];
+		        for (const b of body) {
+		            if (b === exports$1.GLOBSTAR) {
+		                nonGsPartsSums.push(nonGsParts);
+		                currentBody = [[], 0];
+		                bodySegments.push(currentBody);
+		            }
+		            else {
+		                currentBody[0].push(b);
+		                nonGsParts++;
+		            }
+		        }
+		        let i = bodySegments.length - 1;
+		        const fileLength = file.length - fileTailMatch;
+		        for (const b of bodySegments) {
+		            b[1] = fileLength - (nonGsPartsSums[i--] + b[0].length);
+		        }
+		        return !!this.#matchGlobStarBodySections(file, bodySegments, fileIndex, 0, partial, 0, !!fileTailMatch);
+		    }
+		    #matchGlobStarBodySections(file, bodySegments, fileIndex, bodyIndex, partial, globStarDepth, sawTail) {
+		        const bs = bodySegments[bodyIndex];
+		        if (!bs) {
+		            for (let i = fileIndex; i < file.length; i++) {
+		                sawTail = true;
+		                const f = file[i];
+		                if (f === '.' || f === '..' ||
+		                    (!this.options.dot && f.startsWith('.'))) {
+		                    return false;
+		                }
+		            }
+		            return sawTail;
+		        }
+		        const [body, after] = bs;
+		        while (fileIndex <= after) {
+		            const m = this.#matchOne(file.slice(0, fileIndex + body.length), body, partial, fileIndex, 0);
+		            if (m && globStarDepth < this.maxGlobstarRecursion) {
+		                const sub = this.#matchGlobStarBodySections(file, bodySegments, fileIndex + body.length, bodyIndex + 1, partial, globStarDepth + 1, sawTail);
+		                if (sub !== false)
+		                    return sub;
+		            }
+		            const f = file[fileIndex];
+		            if (f === '.' || f === '..' ||
+		                (!this.options.dot && f.startsWith('.'))) {
+		                return false;
+		            }
+		            fileIndex++;
+		        }
+		        return partial || null;
+		    }
+		    #matchOne(file, pattern, partial, fileIndex, patternIndex) {
+		        let fi;
+		        let pi;
+		        let pl;
+		        let fl;
+		        for (fi = fileIndex, pi = patternIndex,
+		            fl = file.length, pl = pattern.length; fi < fl && pi < pl; fi++, pi++) {
 		            this.debug('matchOne loop');
-		            var p = pattern[pi];
-		            var f = file[fi];
+		            let p = pattern[pi];
+		            let f = file[fi];
 		            this.debug(pattern, p, f);
-		            // should be impossible.
-		            // some invalid regexp stuff in the set.
 		            /* c8 ignore start */
-		            if (p === false) {
+		            if (p === false || p === exports$1.GLOBSTAR)
 		                return false;
-		            }
 		            /* c8 ignore stop */
-		            if (p === exports$1.GLOBSTAR) {
-		                this.debug('GLOBSTAR', [pattern, p, f]);
-		                // "**"
-		                // a/**/b/**/c would match the following:
-		                // a/b/x/y/z/c
-		                // a/x/y/z/b/c
-		                // a/b/x/b/x/c
-		                // a/b/c
-		                // To do this, take the rest of the pattern after
-		                // the **, and see if it would match the file remainder.
-		                // If so, return success.
-		                // If not, the ** "swallows" a segment, and try again.
-		                // This is recursively awful.
-		                //
-		                // a/**/b/**/c matching a/b/x/y/z/c
-		                // - a matches a
-		                // - doublestar
-		                //   - matchOne(b/x/y/z/c, b/**/c)
-		                //     - b matches b
-		                //     - doublestar
-		                //       - matchOne(x/y/z/c, c) -> no
-		                //       - matchOne(y/z/c, c) -> no
-		                //       - matchOne(z/c, c) -> no
-		                //       - matchOne(c, c) yes, hit
-		                var fr = fi;
-		                var pr = pi + 1;
-		                if (pr === pl) {
-		                    this.debug('** at the end');
-		                    // a ** at the end will just swallow the rest.
-		                    // We have found a match.
-		                    // however, it will not swallow /.x, unless
-		                    // options.dot is set.
-		                    // . and .. are *never* matched by **, for explosively
-		                    // exponential reasons.
-		                    for (; fi < fl; fi++) {
-		                        if (file[fi] === '.' ||
-		                            file[fi] === '..' ||
-		                            (!options.dot && file[fi].charAt(0) === '.'))
-		                            return false;
-		                    }
-		                    return true;
-		                }
-		                // ok, let's see if we can swallow whatever we can.
-		                while (fr < fl) {
-		                    var swallowee = file[fr];
-		                    this.debug('\nglobstar while', file, fr, pattern, pr, swallowee);
-		                    // XXX remove this slice.  Just pass the start index.
-		                    if (this.matchOne(file.slice(fr), pattern.slice(pr), partial)) {
-		                        this.debug('globstar found match!', fr, fl, swallowee);
-		                        // found a match.
-		                        return true;
-		                    }
-		                    else {
-		                        // can't swallow "." or ".." ever.
-		                        // can only swallow ".foo" when explicitly asked.
-		                        if (swallowee === '.' ||
-		                            swallowee === '..' ||
-		                            (!options.dot && swallowee.charAt(0) === '.')) {
-		                            this.debug('dot detected!', file, fr, pattern, pr);
-		                            break;
-		                        }
-		                        // ** swallows a segment, and continue.
-		                        this.debug('globstar swallow a segment, and continue');
-		                        fr++;
-		                    }
-		                }
-		                // no match was found.
-		                // However, in partial mode, we can't say this is necessarily over.
-		                /* c8 ignore start */
-		                if (partial) {
-		                    // ran out of file
-		                    this.debug('\n>>> no match, partial?', file, fr, pattern, pr);
-		                    if (fr === fl) {
-		                        return true;
-		                    }
-		                }
-		                /* c8 ignore stop */
-		                return false;
-		            }
-		            // something other than **
-		            // non-magic patterns just have to match exactly
-		            // patterns with magic have been turned into regexps.
 		            let hit;
 		            if (typeof p === 'string') {
 		                hit = f === p;
@@ -68858,38 +68696,17 @@ function requireCommonjs$4 () {
 		            if (!hit)
 		                return false;
 		        }
-		        // Note: ending in / means that we'll get a final ""
-		        // at the end of the pattern.  This can only match a
-		        // corresponding "" at the end of the file.
-		        // If the file ends in /, then it can only match a
-		        // a pattern that ends in /, unless the pattern just
-		        // doesn't have any more for it. But, a/b/ should *not*
-		        // match "a/b/*", even though "" matches against the
-		        // [^/]*? pattern, except in partial mode, where it might
-		        // simply not be reached yet.
-		        // However, a/b/ should still satisfy a/*
-		        // now either we fell off the end of the pattern, or we're done.
 		        if (fi === fl && pi === pl) {
-		            // ran out of pattern and filename at the same time.
-		            // an exact hit!
 		            return true;
 		        }
 		        else if (fi === fl) {
-		            // ran out of file, but still had pattern left.
-		            // this is ok if we're doing the match as part of
-		            // a glob fs traversal.
 		            return partial;
 		        }
 		        else if (pi === pl) {
-		            // ran out of pattern, still have file left.
-		            // this is only acceptable if we're on the very last
-		            // empty segment of a file with a trailing slash.
-		            // a/* should match a/b/
 		            return fi === fl - 1 && file[fi] === '';
 		            /* c8 ignore start */
 		        }
 		        else {
-		            // should be unreachable.
 		            throw new Error('wtf?');
 		        }
 		        /* c8 ignore stop */
@@ -70710,7 +70527,11 @@ function requireCommonjs$2 () {
 		    (s instanceof Minipass ||
 		        s instanceof node_stream_1.default ||
 		        (0, exports$1.isReadable)(s) ||
-		        (0, exports$1.isWritable)(s));
+		        (0, exports$1.isWritable)(s))
+		/**
+		 * Return true if the argument is a valid {@link Minipass.Readable}
+		 */
+		;
 		exports$1.isStream = isStream;
 		/**
 		 * Return true if the argument is a valid {@link Minipass.Readable}
@@ -70720,7 +70541,11 @@ function requireCommonjs$2 () {
 		    s instanceof node_events_1.EventEmitter &&
 		    typeof s.pipe === 'function' &&
 		    // node core Writable streams have a pipe() method, but it throws
-		    s.pipe !== node_stream_1.default.Writable.prototype.pipe;
+		    s.pipe !== node_stream_1.default.Writable.prototype.pipe
+		/**
+		 * Return true if the argument is a valid {@link Minipass.Writable}
+		 */
+		;
 		exports$1.isReadable = isReadable;
 		/**
 		 * Return true if the argument is a valid {@link Minipass.Writable}
@@ -70817,7 +70642,7 @@ function requireCommonjs$2 () {
 		    }
 		    constructor(src, dest, opts) {
 		        super(src, dest, opts);
-		        this.proxyErrors = er => dest.emit('error', er);
+		        this.proxyErrors = (er) => this.dest.emit('error', er);
 		        src.on('error', this.proxyErrors);
 		    }
 		}
@@ -71627,6 +71452,7 @@ function requireCommonjs$2 () {
 		            [Symbol.asyncIterator]() {
 		                return this;
 		            },
+		            [Symbol.asyncDispose]: async () => { },
 		        };
 		    }
 		    /**
@@ -71664,6 +71490,7 @@ function requireCommonjs$2 () {
 		            [Symbol.iterator]() {
 		                return this;
 		            },
+		            [Symbol.dispose]: () => { },
 		        };
 		    }
 		    /**
@@ -78610,6 +78437,16 @@ function requireZip () {
 
 var tarStream = {};
 
+var _default;
+var hasRequired_default;
+
+function require_default () {
+	if (hasRequired_default) return _default;
+	hasRequired_default = 1;
+	_default = require$$1__default;
+	return _default;
+}
+
 var fixedSize;
 var hasRequiredFixedSize;
 
@@ -78721,153 +78558,153 @@ var hasRequiredB4a;
 function requireB4a () {
 	if (hasRequiredB4a) return b4a;
 	hasRequiredB4a = 1;
-	function isBuffer (value) {
+	function isBuffer(value) {
 	  return Buffer.isBuffer(value) || value instanceof Uint8Array
 	}
 
-	function isEncoding (encoding) {
+	function isEncoding(encoding) {
 	  return Buffer.isEncoding(encoding)
 	}
 
-	function alloc (size, fill, encoding) {
+	function alloc(size, fill, encoding) {
 	  return Buffer.alloc(size, fill, encoding)
 	}
 
-	function allocUnsafe (size) {
+	function allocUnsafe(size) {
 	  return Buffer.allocUnsafe(size)
 	}
 
-	function allocUnsafeSlow (size) {
+	function allocUnsafeSlow(size) {
 	  return Buffer.allocUnsafeSlow(size)
 	}
 
-	function byteLength (string, encoding) {
+	function byteLength(string, encoding) {
 	  return Buffer.byteLength(string, encoding)
 	}
 
-	function compare (a, b) {
+	function compare(a, b) {
 	  return Buffer.compare(a, b)
 	}
 
-	function concat (buffers, totalLength) {
+	function concat(buffers, totalLength) {
 	  return Buffer.concat(buffers, totalLength)
 	}
 
-	function copy (source, target, targetStart, start, end) {
+	function copy(source, target, targetStart, start, end) {
 	  return toBuffer(source).copy(target, targetStart, start, end)
 	}
 
-	function equals (a, b) {
+	function equals(a, b) {
 	  return toBuffer(a).equals(b)
 	}
 
-	function fill (buffer, value, offset, end, encoding) {
+	function fill(buffer, value, offset, end, encoding) {
 	  return toBuffer(buffer).fill(value, offset, end, encoding)
 	}
 
-	function from (value, encodingOrOffset, length) {
+	function from(value, encodingOrOffset, length) {
 	  return Buffer.from(value, encodingOrOffset, length)
 	}
 
-	function includes (buffer, value, byteOffset, encoding) {
+	function includes(buffer, value, byteOffset, encoding) {
 	  return toBuffer(buffer).includes(value, byteOffset, encoding)
 	}
 
-	function indexOf (buffer, value, byfeOffset, encoding) {
+	function indexOf(buffer, value, byfeOffset, encoding) {
 	  return toBuffer(buffer).indexOf(value, byfeOffset, encoding)
 	}
 
-	function lastIndexOf (buffer, value, byteOffset, encoding) {
+	function lastIndexOf(buffer, value, byteOffset, encoding) {
 	  return toBuffer(buffer).lastIndexOf(value, byteOffset, encoding)
 	}
 
-	function swap16 (buffer) {
+	function swap16(buffer) {
 	  return toBuffer(buffer).swap16()
 	}
 
-	function swap32 (buffer) {
+	function swap32(buffer) {
 	  return toBuffer(buffer).swap32()
 	}
 
-	function swap64 (buffer) {
+	function swap64(buffer) {
 	  return toBuffer(buffer).swap64()
 	}
 
-	function toBuffer (buffer) {
+	function toBuffer(buffer) {
 	  if (Buffer.isBuffer(buffer)) return buffer
 	  return Buffer.from(buffer.buffer, buffer.byteOffset, buffer.byteLength)
 	}
 
-	function toString (buffer, encoding, start, end) {
+	function toString(buffer, encoding, start, end) {
 	  return toBuffer(buffer).toString(encoding, start, end)
 	}
 
-	function write (buffer, string, offset, length, encoding) {
+	function write(buffer, string, offset, length, encoding) {
 	  return toBuffer(buffer).write(string, offset, length, encoding)
 	}
 
-	function writeDoubleLE (buffer, value, offset) {
-	  return toBuffer(buffer).writeDoubleLE(value, offset)
-	}
-
-	function writeFloatLE (buffer, value, offset) {
-	  return toBuffer(buffer).writeFloatLE(value, offset)
-	}
-
-	function writeUInt32LE (buffer, value, offset) {
-	  return toBuffer(buffer).writeUInt32LE(value, offset)
-	}
-
-	function writeInt32LE (buffer, value, offset) {
-	  return toBuffer(buffer).writeInt32LE(value, offset)
-	}
-
-	function readDoubleLE (buffer, offset) {
-	  return toBuffer(buffer).readDoubleLE(offset)
-	}
-
-	function readFloatLE (buffer, offset) {
-	  return toBuffer(buffer).readFloatLE(offset)
-	}
-
-	function readUInt32LE (buffer, offset) {
-	  return toBuffer(buffer).readUInt32LE(offset)
-	}
-
-	function readInt32LE (buffer, offset) {
-	  return toBuffer(buffer).readInt32LE(offset)
-	}
-
-	function writeDoubleBE (buffer, value, offset) {
-	  return toBuffer(buffer).writeDoubleBE(value, offset)
-	}
-
-	function writeFloatBE (buffer, value, offset) {
-	  return toBuffer(buffer).writeFloatBE(value, offset)
-	}
-
-	function writeUInt32BE (buffer, value, offset) {
-	  return toBuffer(buffer).writeUInt32BE(value, offset)
-	}
-
-	function writeInt32BE (buffer, value, offset) {
-	  return toBuffer(buffer).writeInt32BE(value, offset)
-	}
-
-	function readDoubleBE (buffer, offset) {
+	function readDoubleBE(buffer, offset) {
 	  return toBuffer(buffer).readDoubleBE(offset)
 	}
 
-	function readFloatBE (buffer, offset) {
+	function readDoubleLE(buffer, offset) {
+	  return toBuffer(buffer).readDoubleLE(offset)
+	}
+
+	function readFloatBE(buffer, offset) {
 	  return toBuffer(buffer).readFloatBE(offset)
 	}
 
-	function readUInt32BE (buffer, offset) {
+	function readFloatLE(buffer, offset) {
+	  return toBuffer(buffer).readFloatLE(offset)
+	}
+
+	function readInt32BE(buffer, offset) {
+	  return toBuffer(buffer).readInt32BE(offset)
+	}
+
+	function readInt32LE(buffer, offset) {
+	  return toBuffer(buffer).readInt32LE(offset)
+	}
+
+	function readUInt32BE(buffer, offset) {
 	  return toBuffer(buffer).readUInt32BE(offset)
 	}
 
-	function readInt32BE (buffer, offset) {
-	  return toBuffer(buffer).readInt32BE(offset)
+	function readUInt32LE(buffer, offset) {
+	  return toBuffer(buffer).readUInt32LE(offset)
+	}
+
+	function writeDoubleBE(buffer, value, offset) {
+	  return toBuffer(buffer).writeDoubleBE(value, offset)
+	}
+
+	function writeDoubleLE(buffer, value, offset) {
+	  return toBuffer(buffer).writeDoubleLE(value, offset)
+	}
+
+	function writeFloatBE(buffer, value, offset) {
+	  return toBuffer(buffer).writeFloatBE(value, offset)
+	}
+
+	function writeFloatLE(buffer, value, offset) {
+	  return toBuffer(buffer).writeFloatLE(value, offset)
+	}
+
+	function writeInt32BE(buffer, value, offset) {
+	  return toBuffer(buffer).writeInt32BE(value, offset)
+	}
+
+	function writeInt32LE(buffer, value, offset) {
+	  return toBuffer(buffer).writeInt32LE(value, offset)
+	}
+
+	function writeUInt32BE(buffer, value, offset) {
+	  return toBuffer(buffer).writeUInt32BE(value, offset)
+	}
+
+	function writeUInt32LE(buffer, value, offset) {
+	  return toBuffer(buffer).writeUInt32LE(value, offset)
 	}
 
 	b4a = {
@@ -78892,23 +78729,22 @@ function requireB4a () {
 	  toBuffer,
 	  toString,
 	  write,
-	  writeDoubleLE,
-	  writeFloatLE,
-	  writeUInt32LE,
-	  writeInt32LE,
-	  readDoubleLE,
-	  readFloatLE,
-	  readUInt32LE,
-	  readInt32LE,
-	  writeDoubleBE,
-	  writeFloatBE,
-	  writeUInt32BE,
-	  writeInt32BE,
 	  readDoubleBE,
+	  readDoubleLE,
 	  readFloatBE,
+	  readFloatLE,
+	  readInt32BE,
+	  readInt32LE,
 	  readUInt32BE,
-	  readInt32BE
-
+	  readUInt32LE,
+	  writeDoubleBE,
+	  writeDoubleLE,
+	  writeFloatBE,
+	  writeFloatLE,
+	  writeInt32BE,
+	  writeInt32LE,
+	  writeUInt32BE,
+	  writeUInt32LE
 	};
 	return b4a;
 }
@@ -78922,19 +78758,19 @@ function requirePassThroughDecoder () {
 	const b4a = requireB4a();
 
 	passThroughDecoder = class PassThroughDecoder {
-	  constructor (encoding) {
+	  constructor(encoding) {
 	    this.encoding = encoding;
 	  }
 
-	  get remaining () {
+	  get remaining() {
 	    return 0
 	  }
 
-	  decode (tail) {
-	    return b4a.toString(tail, this.encoding)
+	  decode(data) {
+	    return b4a.toString(data, this.encoding)
 	  }
 
-	  flush () {
+	  flush() {
 	    return ''
 	  }
 	};
@@ -78953,70 +78789,91 @@ function requireUtf8Decoder () {
 	 * https://encoding.spec.whatwg.org/#utf-8-decoder
 	 */
 	utf8Decoder = class UTF8Decoder {
-	  constructor () {
-	    this.codePoint = 0;
-	    this.bytesSeen = 0;
-	    this.bytesNeeded = 0;
-	    this.lowerBoundary = 0x80;
-	    this.upperBoundary = 0xbf;
+	  constructor() {
+	    this._reset();
 	  }
 
-	  get remaining () {
+	  get remaining() {
 	    return this.bytesSeen
 	  }
 
-	  decode (data) {
-	    // If we have a fast path, just sniff if the last part is a boundary
-	    if (this.bytesNeeded === 0) {
-	      let isBoundary = true;
+	  decode(data) {
+	    if (data.byteLength === 0) return ''
 
-	      for (let i = Math.max(0, data.byteLength - 4), n = data.byteLength; i < n && isBoundary; i++) {
-	        isBoundary = data[i] <= 0x7f;
-	      }
-
-	      if (isBoundary) return b4a.toString(data, 'utf8')
+	    if (this.bytesNeeded === 0 && trailingIncomplete(data, 0) === 0) {
+	      this.bytesSeen = trailingBytesSeen(data);
+	      return b4a.toString(data, 'utf8')
 	    }
 
 	    let result = '';
+	    let start = 0;
 
-	    for (let i = 0, n = data.byteLength; i < n; i++) {
+	    if (this.bytesNeeded > 0) {
+	      while (start < data.byteLength) {
+	        const byte = data[start];
+
+	        if (byte < this.lowerBoundary || byte > this.upperBoundary) {
+	          result += '\ufffd';
+	          this._reset();
+	          break
+	        }
+
+	        this.lowerBoundary = 0x80;
+	        this.upperBoundary = 0xbf;
+	        this.codePoint = (this.codePoint << 6) | (byte & 0x3f);
+	        this.bytesSeen++;
+	        start++;
+
+	        if (this.bytesSeen === this.bytesNeeded) {
+	          result += String.fromCodePoint(this.codePoint);
+	          this._reset();
+	          break
+	        }
+	      }
+
+	      if (this.bytesNeeded > 0) return result
+	    }
+
+	    const trailing = trailingIncomplete(data, start);
+	    const end = data.byteLength - trailing;
+
+	    if (end > start) result += b4a.toString(data, 'utf8', start, end);
+
+	    for (let i = end; i < data.byteLength; i++) {
 	      const byte = data[i];
 
 	      if (this.bytesNeeded === 0) {
 	        if (byte <= 0x7f) {
+	          this.bytesSeen = 0;
 	          result += String.fromCharCode(byte);
+	        } else if (byte >= 0xc2 && byte <= 0xdf) {
+	          this.bytesNeeded = 2;
+	          this.bytesSeen = 1;
+	          this.codePoint = byte & 0x1f;
+	        } else if (byte >= 0xe0 && byte <= 0xef) {
+	          if (byte === 0xe0) this.lowerBoundary = 0xa0;
+	          else if (byte === 0xed) this.upperBoundary = 0x9f;
+	          this.bytesNeeded = 3;
+	          this.bytesSeen = 1;
+	          this.codePoint = byte & 0xf;
+	        } else if (byte >= 0xf0 && byte <= 0xf4) {
+	          if (byte === 0xf0) this.lowerBoundary = 0x90;
+	          else if (byte === 0xf4) this.upperBoundary = 0x8f;
+	          this.bytesNeeded = 4;
+	          this.bytesSeen = 1;
+	          this.codePoint = byte & 0x7;
 	        } else {
 	          this.bytesSeen = 1;
-
-	          if (byte >= 0xc2 && byte <= 0xdf) {
-	            this.bytesNeeded = 2;
-	            this.codePoint = byte & 0x1f;
-	          } else if (byte >= 0xe0 && byte <= 0xef) {
-	            if (byte === 0xe0) this.lowerBoundary = 0xa0;
-	            else if (byte === 0xed) this.upperBoundary = 0x9f;
-	            this.bytesNeeded = 3;
-	            this.codePoint = byte & 0xf;
-	          } else if (byte >= 0xf0 && byte <= 0xf4) {
-	            if (byte === 0xf0) this.lowerBoundary = 0x90;
-	            if (byte === 0xf4) this.upperBoundary = 0x8f;
-	            this.bytesNeeded = 4;
-	            this.codePoint = byte & 0x7;
-	          } else {
-	            result += '\ufffd';
-	          }
+	          result += '\ufffd';
 	        }
 
 	        continue
 	      }
 
 	      if (byte < this.lowerBoundary || byte > this.upperBoundary) {
-	        this.codePoint = 0;
-	        this.bytesNeeded = 0;
-	        this.bytesSeen = 0;
-	        this.lowerBoundary = 0x80;
-	        this.upperBoundary = 0xbf;
-
 	        result += '\ufffd';
+	        i--;
+	        this._reset();
 
 	        continue
 	      }
@@ -79027,30 +78884,90 @@ function requireUtf8Decoder () {
 	      this.codePoint = (this.codePoint << 6) | (byte & 0x3f);
 	      this.bytesSeen++;
 
-	      if (this.bytesSeen !== this.bytesNeeded) continue
-
-	      result += String.fromCodePoint(this.codePoint);
-
-	      this.codePoint = 0;
-	      this.bytesNeeded = 0;
-	      this.bytesSeen = 0;
+	      if (this.bytesSeen === this.bytesNeeded) {
+	        result += String.fromCodePoint(this.codePoint);
+	        this._reset();
+	      }
 	    }
 
 	    return result
 	  }
 
-	  flush () {
+	  flush() {
 	    const result = this.bytesNeeded > 0 ? '\ufffd' : '';
+	    this._reset();
+	    return result
+	  }
 
+	  _reset() {
 	    this.codePoint = 0;
 	    this.bytesNeeded = 0;
 	    this.bytesSeen = 0;
 	    this.lowerBoundary = 0x80;
 	    this.upperBoundary = 0xbf;
-
-	    return result
 	  }
 	};
+
+	function trailingIncomplete(data, start) {
+	  const len = data.byteLength;
+	  if (len <= start) return 0
+
+	  const limit = Math.max(start, len - 4);
+
+	  let i = len - 1;
+	  while (i > limit && (data[i] & 0xc0) === 0x80) i--;
+
+	  if (i < start) return 0
+
+	  const byte = data[i];
+
+	  let needed;
+	  if (byte <= 0x7f) return 0
+	  if (byte >= 0xc2 && byte <= 0xdf) needed = 2;
+	  else if (byte >= 0xe0 && byte <= 0xef) needed = 3;
+	  else if (byte >= 0xf0 && byte <= 0xf4) needed = 4;
+	  else return 0
+
+	  const available = len - i;
+	  return available < needed ? available : 0
+	}
+
+	function trailingBytesSeen(data) {
+	  const len = data.byteLength;
+	  if (len === 0) return 0
+
+	  const last = data[len - 1];
+
+	  if (last <= 0x7f) return 0
+	  if ((last & 0xc0) !== 0x80) return 1
+
+	  const limit = Math.max(0, len - 4);
+
+	  let i = len - 2;
+	  while (i >= limit && (data[i] & 0xc0) === 0x80) i--;
+
+	  if (i < 0) return 1
+
+	  const first = data[i];
+
+	  let needed;
+	  if (first >= 0xc2 && first <= 0xdf) needed = 2;
+	  else if (first >= 0xe0 && first <= 0xef) needed = 3;
+	  else if (first >= 0xf0 && first <= 0xf4) needed = 4;
+	  else return 1
+
+	  if (len - i !== needed) return 1
+
+	  if (needed >= 3) {
+	    const second = data[i + 1];
+	    if (first === 0xe0 && second < 0xa0) return 1
+	    if (first === 0xed && second > 0x9f) return 1
+	    if (first === 0xf0 && second < 0x90) return 1
+	    if (first === 0xf4 && second > 0x8f) return 1
+	  }
+
+	  return 0
+	}
 	return utf8Decoder;
 }
 
@@ -79064,7 +78981,7 @@ function requireTextDecoder () {
 	const UTF8Decoder = requireUtf8Decoder();
 
 	textDecoder = class TextDecoder {
-	  constructor (encoding = 'utf8') {
+	  constructor(encoding = 'utf8') {
 	    this.encoding = normalizeEncoding(encoding);
 
 	    switch (this.encoding) {
@@ -79079,21 +78996,21 @@ function requireTextDecoder () {
 	    }
 	  }
 
-	  get remaining () {
+	  get remaining() {
 	    return this.decoder.remaining
 	  }
 
-	  push (data) {
+	  push(data) {
 	    if (typeof data === 'string') return data
 	    return this.decoder.decode(data)
 	  }
 
 	  // For Node.js compatibility
-	  write (data) {
+	  write(data) {
 	    return this.push(data)
 	  }
 
-	  end (data) {
+	  end(data) {
 	    let result = '';
 	    if (data) result = this.push(data);
 	    result += this.decoder.flush();
@@ -79101,7 +79018,7 @@ function requireTextDecoder () {
 	  }
 	};
 
-	function normalizeEncoding (encoding) {
+	function normalizeEncoding(encoding) {
 	  encoding = encoding.toLowerCase();
 
 	  switch (encoding) {
@@ -79123,7 +79040,8 @@ function requireTextDecoder () {
 	    default:
 	      throw new Error('Unknown encoding: ' + encoding)
 	  }
-	}	return textDecoder;
+	}
+	return textDecoder;
 }
 
 var streamx;
@@ -79132,12 +79050,15 @@ var hasRequiredStreamx;
 function requireStreamx () {
 	if (hasRequiredStreamx) return streamx;
 	hasRequiredStreamx = 1;
-	const { EventEmitter } = require$$1__default;
+	const { EventEmitter } = require_default();
 	const STREAM_DESTROYED = new Error('Stream was destroyed');
 	const PREMATURE_CLOSE = new Error('Premature close');
 
 	const FIFO = requireFastFifo();
 	const TextDecoder = requireTextDecoder();
+
+	// if we do a future major, expect queue microtask to be there always, for now a bit defensive
+	const qmt = typeof queueMicrotask === 'undefined' ? fn => commonjsGlobal.process.nextTick(fn) : queueMicrotask;
 
 	/* eslint-disable no-multi-spaces */
 
@@ -79366,7 +79287,7 @@ function requireStreamx () {
 	  updateNextTick () {
 	    if ((this.stream._duplexState & WRITE_NEXT_TICK) !== 0) return
 	    this.stream._duplexState |= WRITE_NEXT_TICK;
-	    if ((this.stream._duplexState & WRITE_UPDATING) === 0) queueMicrotask(this.afterUpdateNextTick);
+	    if ((this.stream._duplexState & WRITE_UPDATING) === 0) qmt(this.afterUpdateNextTick);
 	  }
 	}
 
@@ -79554,13 +79475,13 @@ function requireStreamx () {
 	  updateNextTickIfOpen () {
 	    if ((this.stream._duplexState & READ_NEXT_TICK_OR_OPENING) !== 0) return
 	    this.stream._duplexState |= READ_NEXT_TICK;
-	    if ((this.stream._duplexState & READ_UPDATING) === 0) queueMicrotask(this.afterUpdateNextTick);
+	    if ((this.stream._duplexState & READ_UPDATING) === 0) qmt(this.afterUpdateNextTick);
 	  }
 
 	  updateNextTick () {
 	    if ((this.stream._duplexState & READ_NEXT_TICK) !== 0) return
 	    this.stream._duplexState |= READ_NEXT_TICK;
-	    if ((this.stream._duplexState & READ_UPDATING) === 0) queueMicrotask(this.afterUpdateNextTick);
+	    if ((this.stream._duplexState & READ_UPDATING) === 0) qmt(this.afterUpdateNextTick);
 	  }
 	}
 
@@ -82095,6 +82016,16 @@ function requireArchiver () {
 }
 
 requireArchiver();
+
+(undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments || [])).next());
+    });
+};
 
 (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
@@ -84905,7 +84836,7 @@ async function setupProfiler(shouldCache) {
 }
 
 async function getReleasedVersion(owner, repo, requestedVersion, safeVersion) {
-  let toolVersion = '';
+  var toolVersion;
 
   if (requestedVersion == 'latest') {
     // get the latest release in the repo
@@ -84936,7 +84867,8 @@ async function getReleasedVersion(owner, repo, requestedVersion, safeVersion) {
       );
     } catch (e) {
       throw new Error(
-        `Failed to get latest release of ${owner}/${repo}, error message: ${e.message}`
+        `Failed to get latest release of ${owner}/${repo}, error message: ${e.message}`,
+        { cause: e }
       )
     }
   } else if (requestedVersion) {
@@ -84961,7 +84893,8 @@ async function getReleasedVersion(owner, repo, requestedVersion, safeVersion) {
         );
       } catch (e) {
         throw new Error(
-          `Release version ${requestedVersion} does not exist in ${owner}/${repo}`
+          `Release version ${requestedVersion} does not exist in ${owner}/${repo}`,
+          { cause: e }
         )
       }
 
