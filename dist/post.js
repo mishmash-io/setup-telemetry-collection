@@ -25621,9 +25621,6 @@ function requirePermessageDeflate () {
 
 	  #options = {}
 
-	  /** @type {number} */
-	  #maxDecompressedSize
-
 	  /** @type {boolean} */
 	  #aborted = false
 
@@ -25632,12 +25629,10 @@ function requirePermessageDeflate () {
 
 	  /**
 	   * @param {Map<string, string>} extensions
-	   * @param {{ maxDecompressedMessageSize?: number }} [options]
 	   */
-	  constructor (extensions, options = {}) {
+	  constructor (extensions) {
 	    this.#options.serverNoContextTakeover = extensions.has('server_no_context_takeover');
 	    this.#options.serverMaxWindowBits = extensions.get('server_max_window_bits');
-	    this.#maxDecompressedSize = options.maxDecompressedMessageSize ?? kDefaultMaxDecompressedSize;
 	  }
 
 	  decompress (chunk, fin, callback) {
@@ -25679,7 +25674,7 @@ function requirePermessageDeflate () {
 
 	        this.#inflate[kLength] += data.length;
 
-	        if (this.#inflate[kLength] > this.#maxDecompressedSize) {
+	        if (this.#inflate[kLength] > kDefaultMaxDecompressedSize) {
 	          this.#aborted = true;
 	          this.#inflate.removeAllListeners();
 	          this.#inflate.destroy();
@@ -25772,23 +25767,18 @@ function requireReceiver () {
 	  /** @type {Map<string, PerMessageDeflate>} */
 	  #extensions
 
-	  /** @type {{ maxDecompressedMessageSize?: number }} */
-	  #options
-
 	  /**
 	   * @param {import('./websocket').WebSocket} ws
 	   * @param {Map<string, string>|null} extensions
-	   * @param {{ maxDecompressedMessageSize?: number }} [options]
 	   */
-	  constructor (ws, extensions, options = {}) {
+	  constructor (ws, extensions) {
 	    super();
 
 	    this.ws = ws;
 	    this.#extensions = extensions == null ? new Map() : extensions;
-	    this.#options = options;
 
 	    if (this.#extensions.has('permessage-deflate')) {
-	      this.#extensions.set('permessage-deflate', new PerMessageDeflate(extensions, options));
+	      this.#extensions.set('permessage-deflate', new PerMessageDeflate(extensions));
 	    }
 	  }
 
@@ -26331,9 +26321,6 @@ function requireWebsocket () {
 	  /** @type {SendQueue} */
 	  #sendQueue
 
-	  /** @type {{ maxDecompressedMessageSize?: number }} */
-	  #options
-
 	  /**
 	   * @param {string} url
 	   * @param {string|string[]} protocols
@@ -26406,11 +26393,6 @@ function requireWebsocket () {
 
 	    // 10. Set this's url to urlRecord.
 	    this[kWebSocketURL] = new URL(urlRecord.href);
-
-	    // Store options for later use (e.g., maxDecompressedMessageSize)
-	    this.#options = {
-	      maxDecompressedMessageSize: options.maxDecompressedMessageSize
-	    };
 
 	    // 11. Let client be this's relevant settings object.
 	    const client = environmentSettingsObject.settingsObject;
@@ -26730,7 +26712,7 @@ function requireWebsocket () {
 	    // once this happens, the connection is open
 	    this[kResponse] = response;
 
-	    const parser = new ByteParser(this, parsedExtensions, this.#options);
+	    const parser = new ByteParser(this, parsedExtensions);
 	    parser.on('drain', onParserDrain);
 	    parser.on('error', onParserError.bind(this));
 
@@ -26833,19 +26815,6 @@ function requireWebsocket () {
 	  {
 	    key: 'headers',
 	    converter: webidl.nullableConverter(webidl.converters.HeadersInit)
-	  },
-	  {
-	    key: 'maxDecompressedMessageSize',
-	    converter: webidl.nullableConverter((V) => {
-	      V = webidl.converters['unsigned long long'](V);
-	      if (V <= 0) {
-	        throw webidl.errors.exception({
-	          header: 'WebSocket constructor',
-	          message: 'maxDecompressedMessageSize must be greater than 0'
-	        })
-	      }
-	      return V
-	    })
 	  }
 	]);
 
@@ -34423,14 +34392,26 @@ const bigIntsStringify = /([\[:])?"(-?\d+)n"($|([\\n]|\s)*(\s|[\\n])*[,\}\]])/g;
 const noiseStringify =
   /([\[:])?("-?\d+n+)n("$|"([\\n]|\s)*(\s|[\\n])*[,\}\]])/g;
 
-/** @typedef {(key: string, value: any, context?: { source: string }) => any} Reviver */
+/**
+ * @typedef {(this: any, key: string | number | undefined, value: any) => any} Replacer
+ * @typedef {(key: string | number | undefined, value: any, context?: { source: string }) => any} Reviver
+ */
 
 /**
- * Function to serialize value to a JSON string.
- * Converts BigInt values to a custom format (strings with digits and "n" at the end) and then converts them to proper big integers in a JSON string.
- * @param {*} value - The value to convert to a JSON string.
- * @param {(Function|Array<string>|null)} [replacer] - A function that alters the behavior of the stringification process, or an array of strings to indicate properties to exclude.
- * @param {(string|number)} [space] - A string or number to specify indentation or pretty-printing.
+ * Converts a JavaScript value to a JSON string.
+ *
+ * Supports serialization of BigInt values using two strategies:
+ * 1. Custom format "123n" → "123" (universal fallback)
+ * 2. Native JSON.rawJSON() (Node.js 22+, fastest) when available
+ *
+ * All other values are serialized exactly like native JSON.stringify().
+ *
+ * @param {*} value The value to convert to a JSON string.
+ * @param {Replacer | Array<string | number> | null} [replacer]
+ *   A function that alters the behavior of the stringification process,
+ *   or an array of strings/numbers to indicate properties to exclude.
+ * @param {string | number} [space]
+ *   A string or number to specify indentation or pretty-printing.
  * @returns {string} The JSON string representation.
  */
 const JSONStringify = (value, replacer, space) => {
@@ -34453,8 +34434,7 @@ const JSONStringify = (value, replacer, space) => {
   const convertedToCustomJSON = originalStringify(
     value,
     (key, value) => {
-      const isNoise =
-        typeof value === "string" && Boolean(value.match(noiseValue));
+      const isNoise = typeof value === "string" && noiseValue.test(value);
 
       if (isNoise) return value.toString() + "n"; // Mark noise values with additional "n" to offset the deletion of one "n" during the processing
 
@@ -34475,32 +34455,69 @@ const JSONStringify = (value, replacer, space) => {
   return denoisedJSON;
 };
 
-/**
- * Support for JSON.parse's context.source feature detection.
- * @type {boolean}
- */
-const isContextSourceSupported = () =>
-  JSON.parse("1", (_, __, context) => !!context && context.source === "1");
+const featureCache = new Map();
 
 /**
- * Convert marked big numbers to BigInt
- * @type {Reviver}
+ * Detects if the current JSON.parse implementation supports the context.source feature.
+ *
+ * Uses toString() fingerprinting to cache results and automatically detect runtime
+ * replacements of JSON.parse (polyfills, mocks, etc.).
+ *
+ * @returns {boolean} true if context.source is supported, false otherwise.
+ */
+const isContextSourceSupported = () => {
+  const parseFingerprint = JSON.parse.toString();
+
+  if (featureCache.has(parseFingerprint)) {
+    return featureCache.get(parseFingerprint);
+  }
+
+  try {
+    const result = JSON.parse(
+      "1",
+      (_, __, context) => !!context?.source && context.source === "1",
+    );
+    featureCache.set(parseFingerprint, result);
+
+    return result;
+  } catch {
+    featureCache.set(parseFingerprint, false);
+
+    return false;
+  }
+};
+
+/**
+ * Reviver function that converts custom-format BigInt strings back to BigInt values.
+ * Also handles "noise" strings that accidentally match the BigInt format.
+ *
+ * @param {string | number | undefined} key The object key.
+ * @param {*} value The value being parsed.
+ * @param {object} [context] Parse context (if supported by JSON.parse).
+ * @param {Reviver} [userReviver] User's custom reviver function.
+ * @returns {any} The transformed value.
  */
 const convertMarkedBigIntsReviver = (key, value, context, userReviver) => {
   const isCustomFormatBigInt =
-    typeof value === "string" && value.match(customFormat);
+    typeof value === "string" && customFormat.test(value);
   if (isCustomFormatBigInt) return BigInt(value.slice(0, -1));
 
-  const isNoiseValue = typeof value === "string" && value.match(noiseValue);
+  const isNoiseValue = typeof value === "string" && noiseValue.test(value);
   if (isNoiseValue) return value.slice(0, -1);
 
   return value;
 };
 
 /**
- * Faster (2x) and simpler function to parse JSON.
- * Based on JSON.parse's context.source feature, which is not universally available now.
- * Does not support the legacy custom format, used in the first version of this library.
+ * Fast JSON.parse implementation (~2x faster than classic fallback).
+ * Uses JSON.parse's context.source feature to detect integers and convert
+ * large numbers directly to BigInt without string manipulation.
+ *
+ * Does not support legacy custom format from v1 of this library.
+ *
+ * @param {string} text JSON string to parse.
+ * @param {Reviver} [reviver] Transform function to apply to each value.
+ * @returns {any} Parsed JavaScript value.
  */
 const JSONParseV2 = (text, reviver) => {
   return JSON.parse(text, (key, value, context) => {
@@ -34523,9 +34540,21 @@ const stringsOrLargeNumbers =
 const noiseValueWithQuotes = /^"-?\d+n+"$/; // Noise - strings that match the custom format before being converted to it
 
 /**
- * Function to parse JSON.
- * If JSON has number values greater than Number.MAX_SAFE_INTEGER, we convert those values to a custom format, then parse them to BigInt values.
- * Other types of values are not affected and parsed as native JSON.parse() would parse them.
+ * Converts a JSON string into a JavaScript value.
+ *
+ * Supports parsing of large integers using two strategies:
+ * 1. Classic fallback: Marks large numbers with "123n" format, then converts to BigInt
+ * 2. Fast path (JSONParseV2): Uses context.source feature (~2x faster) when available
+ *
+ * All other JSON values are parsed exactly like native JSON.parse().
+ *
+ * @param {string} text A valid JSON string.
+ * @param {Reviver} [reviver]
+ *   A function that transforms the results. This function is called for each member
+ *   of the object. If a member contains nested objects, the nested objects are
+ *   transformed before the parent object is.
+ * @returns {any} The parsed JavaScript value.
+ * @throws {SyntaxError} If text is not valid JSON.
  */
 const JSONParse = (text, reviver) => {
   if (!text) return originalParse(text, reviver);
@@ -34537,7 +34566,7 @@ const JSONParse = (text, reviver) => {
     stringsOrLargeNumbers,
     (text, digits, fractional, exponential) => {
       const isString = text[0] === '"';
-      const isNoise = isString && Boolean(text.match(noiseValueWithQuotes));
+      const isNoise = isString && noiseValueWithQuotes.test(text);
 
       if (isNoise) return text.substring(0, text.length - 1) + 'n"'; // Mark noise values with additional "n" to offset the deletion of one "n" during the processing
 
@@ -53831,10 +53860,10 @@ function normalizeProcessEntities(value) {
     return {
       enabled: value.enabled !== false,
       maxEntitySize: Math.max(1, value.maxEntitySize ?? 10000),
-      maxExpansionDepth: Math.max(1, value.maxExpansionDepth ?? 10),
-      maxTotalExpansions: Math.max(1, value.maxTotalExpansions ?? 1000),
+      maxExpansionDepth: Math.max(1, value.maxExpansionDepth ?? 10000),
+      maxTotalExpansions: Math.max(1, value.maxTotalExpansions ?? Infinity),
       maxExpandedLength: Math.max(1, value.maxExpandedLength ?? 100000),
-      maxEntityCount: Math.max(1, value.maxEntityCount ?? 100),
+      maxEntityCount: Math.max(1, value.maxEntityCount ?? 1000),
       allowedTags: value.allowedTags ?? null,
       tagFilter: value.tagFilter ?? null
     };
@@ -54354,8 +54383,9 @@ function toNumber(str, options = {}) {
 
     let trimmedStr = str.trim();
 
-    if (options.skipLike !== undefined && options.skipLike.test(trimmedStr)) return str;
-    else if (str === "0") return 0;
+    if (trimmedStr.length === 0) return str;
+    else if (options.skipLike !== undefined && options.skipLike.test(trimmedStr)) return str;
+    else if (trimmedStr === "0") return 0;
     else if (options.hex && hexRegex.test(trimmedStr)) {
         return parse_int(trimmedStr, 16);
         // }else if (options.oct && octRegex.test(str)) {
@@ -54431,11 +54461,16 @@ function resolveEnotation(str, trimmedStr, options) {
         else if (leadingZeros.length === 1
             && (notation[3].startsWith(`.${eChar}`) || notation[3][0] === eChar)) {
             return Number(trimmedStr);
-        } else if (options.leadingZeros && !eAdjacentToLeadingZeros) { //accept with leading zeros
-            //remove leading 0s
-            trimmedStr = (notation[1] || "") + notation[3];
+        } else if (leadingZeros.length > 0) {
+            // Has leading zeros — only accept if leadingZeros option allows it
+            if (options.leadingZeros && !eAdjacentToLeadingZeros) {
+                trimmedStr = (notation[1] || "") + notation[3];
+                return Number(trimmedStr);
+            } else return str;
+        } else {
+            // No leading zeros — always valid e-notation, parse it
             return Number(trimmedStr);
-        } else return str;
+        }
     } else {
         return str;
     }
@@ -54524,11 +54559,11 @@ class Expression {
    * @param {Object} options - Configuration options
    * @param {string} options.separator - Path separator (default: '.')
    */
-  constructor(pattern, options = {}) {
+  constructor(pattern, options = {}, data) {
     this.pattern = pattern;
     this.separator = options.separator || '.';
     this.segments = this._parse(pattern);
-
+    this.data = data;
     // Cache expensive checks for performance (O(1) instead of O(n))
     this._hasDeepWildcard = this.segments.some(seg => seg.type === 'deep-wildcard');
     this._hasAttributeCondition = this.segments.some(seg => seg.attrName !== undefined);
@@ -54756,6 +54791,14 @@ class Expression {
  * const expr = new Expression("root.users.user");
  * matcher.matches(expr); // true
  */
+
+/**
+ * Names of methods that mutate Matcher state.
+ * Any attempt to call these on a read-only view throws a TypeError.
+ * @type {Set<string>}
+ */
+const MUTATING_METHODS = new Set(['push', 'pop', 'reset', 'updateCurrent', 'restore']);
+
 class Matcher {
   /**
    * Create a new Matcher
@@ -54769,6 +54812,9 @@ class Matcher {
     // Each path node: { tag: string, values: object, position: number, counter: number }
     // values only present for current (last) node
     // Each siblingStacks entry: Map<tagName, count> tracking occurrences at each level
+    this._pathStringCache = null;
+    this._frozenPathCache = null;        // cache for readOnly().path
+    this._frozenSiblingsCache = null;   // cache for readOnly().siblingStacks
   }
 
   /**
@@ -54778,6 +54824,10 @@ class Matcher {
    * @param {string} namespace - Namespace for the tag (optional)
    */
   push(tagName, attrValues = null, namespace = null) {
+    //invalidate cache
+    this._pathStringCache = null;
+    this._frozenPathCache = null;
+    this._frozenSiblingsCache = null;
     // Remove values from previous current node (now becoming ancestor)
     if (this.path.length > 0) {
       const prev = this.path[this.path.length - 1];
@@ -54832,10 +54882,11 @@ class Matcher {
    * @returns {Object|undefined} The popped node
    */
   pop() {
-    if (this.path.length === 0) {
-      return undefined;
-    }
-
+    if (this.path.length === 0) return undefined;
+    //invalidate cache
+    this._pathStringCache = null;
+    this._frozenPathCache = null;
+    this._frozenSiblingsCache = null;
     const node = this.path.pop();
 
     // Clean up sibling tracking for levels deeper than current
@@ -54858,6 +54909,7 @@ class Matcher {
       const current = this.path[this.path.length - 1];
       if (attrValues !== null && attrValues !== undefined) {
         current.values = attrValues;
+        this._frozenPathCache = null;
       }
     }
   }
@@ -54943,12 +54995,23 @@ class Matcher {
    */
   toString(separator, includeNamespace = true) {
     const sep = separator || this.separator;
-    return this.path.map(n => {
-      if (includeNamespace && n.namespace) {
-        return `${n.namespace}:${n.tag}`;
+    const isDefault = (sep === this.separator && includeNamespace === true);
+
+    if (isDefault) {
+      if (this._pathStringCache !== null && this._pathStringCache !== undefined) {
+        return this._pathStringCache;
       }
-      return n.tag;
-    }).join(sep);
+      const result = this.path.map(n =>
+        (includeNamespace && n.namespace) ? `${n.namespace}:${n.tag}` : n.tag
+      ).join(sep);
+      this._pathStringCache = result;
+      return result;
+    }
+
+    // Non-default separator or includeNamespace=false: don't cache (rare case)
+    return this.path.map(n =>
+      (includeNamespace && n.namespace) ? `${n.namespace}:${n.tag}` : n.tag
+    ).join(sep);
   }
 
   /**
@@ -54963,6 +55026,10 @@ class Matcher {
    * Reset the path to empty
    */
   reset() {
+    //invalidate cache
+    this._pathStringCache = null;
+    this._frozenPathCache = null;
+    this._frozenSiblingsCache = null;
     this.path = [];
     this.siblingStacks = [];
   }
@@ -55135,6 +55202,15 @@ class Matcher {
   }
 
   /**
+ * Match any expression in the given set against the current path.
+ * @param {ExpressionSet} exprSet - The set of expressions to match against.
+ * @returns {boolean} - True if any expression in the set matches the current path, false otherwise.
+ */
+  matchesAny(exprSet) {
+    return exprSet.matchesAny(this);
+  }
+
+  /**
    * Create a snapshot of current state
    * @returns {Object} State snapshot
    */
@@ -55150,8 +55226,94 @@ class Matcher {
    * @param {Object} snapshot - State snapshot
    */
   restore(snapshot) {
+    //invalidate cache
+    this._pathStringCache = null;
+    this._frozenPathCache = null;
+    this._frozenSiblingsCache = null;
     this.path = snapshot.path.map(node => ({ ...node }));
     this.siblingStacks = snapshot.siblingStacks.map(map => new Map(map));
+  }
+
+  /**
+   * Return a read-only view of this matcher.
+   *
+   * The returned object exposes all query/inspection methods but throws a
+   * TypeError if any state-mutating method is called (`push`, `pop`, `reset`,
+   * `updateCurrent`, `restore`).  Property reads (e.g. `.path`, `.separator`)
+   * are allowed but the returned arrays/objects are frozen so callers cannot
+   * mutate internal state through them either.
+   *
+   * @returns {ReadOnlyMatcher} A proxy that forwards read operations and blocks writes.
+   *
+   * @example
+   * const matcher = new Matcher();
+   * matcher.push("root", {});
+   *
+   * const ro = matcher.readOnly();
+   * ro.matches(expr);      // ✓ works
+   * ro.getCurrentTag();    // ✓ works
+   * ro.push("child", {}); // ✗ throws TypeError
+   * ro.reset();            // ✗ throws TypeError
+   */
+  readOnly() {
+    const self = this;
+
+    return new Proxy(self, {
+      get(target, prop, receiver) {
+        // Block mutating methods
+        if (MUTATING_METHODS.has(prop)) {
+          return () => {
+            throw new TypeError(
+              `Cannot call '${prop}' on a read-only Matcher. ` +
+              `Obtain a writable instance to mutate state.`
+            );
+          };
+        }
+
+        // Return cached frozen copy of path — rebuilt only after push/pop/updateCurrent/reset/restore
+        if (prop === 'path') {
+          if (target._frozenPathCache === null) {
+            target._frozenPathCache = Object.freeze(
+              target.path.map(node => Object.freeze({ ...node }))
+            );
+          }
+          return target._frozenPathCache;
+        }
+
+        // Return cached frozen copy of siblingStacks — rebuilt only after push/pop/reset/restore
+        if (prop === 'siblingStacks') {
+          if (target._frozenSiblingsCache === null) {
+            target._frozenSiblingsCache = Object.freeze(
+              target.siblingStacks.map(map => Object.freeze(new Map(map)))
+            );
+          }
+          return target._frozenSiblingsCache;
+        }
+
+        const value = Reflect.get(target, prop, receiver);
+
+        // Bind methods so `this` inside them still refers to the real Matcher
+        if (typeof value === 'function') {
+          return value.bind(target);
+        }
+
+        return value;
+      },
+
+      // Prevent any property assignment on the read-only view
+      set(_target, prop) {
+        throw new TypeError(
+          `Cannot set property '${String(prop)}' on a read-only Matcher.`
+        );
+      },
+
+      // Prevent property deletion
+      deleteProperty(_target, prop) {
+        throw new TypeError(
+          `Cannot delete property '${String(prop)}' from a read-only Matcher.`
+        );
+      }
+    });
   }
 }
 
@@ -55260,6 +55422,10 @@ class OrderedObjParser {
     // Initialize path matcher for path-expression-matcher
     this.matcher = new Matcher();
 
+    // Live read-only proxy of matcher — PEM creates and caches this internally.
+    // All user callbacks receive this instead of the mutable matcher.
+    this.readonlyMatcher = this.matcher.readOnly();
+
     // Flag to track if current node is a stop node (optimization)
     this.isCurrentNodeStopNode = false;
 
@@ -55360,89 +55526,80 @@ function buildAttributesMap(attrStr, jPath, tagName) {
     const len = matches.length; //don't make it inline
     const attrs = {};
 
-    // First pass: parse all attributes and update matcher with raw values
-    // This ensures the matcher has all attribute values when processors run
+    // Pre-process values once: trim + entity replacement
+    // Reused in both matcher update and second pass
+    const processedVals = new Array(len);
+    let hasRawAttrs = false;
     const rawAttrsForMatcher = {};
+
     for (let i = 0; i < len; i++) {
       const attrName = this.resolveNameSpace(matches[i][1]);
       const oldVal = matches[i][4];
 
       if (attrName.length && oldVal !== undefined) {
-        let parsedVal = oldVal;
-        if (this.options.trimValues) {
-          parsedVal = parsedVal.trim();
-        }
-        parsedVal = this.replaceEntitiesValue(parsedVal, tagName, jPath);
-        rawAttrsForMatcher[attrName] = parsedVal;
+        let val = oldVal;
+        if (this.options.trimValues) val = val.trim();
+        val = this.replaceEntitiesValue(val, tagName, this.readonlyMatcher);
+        processedVals[i] = val;
+
+        rawAttrsForMatcher[attrName] = val;
+        hasRawAttrs = true;
       }
     }
 
-    // Update matcher with raw attribute values BEFORE running processors
-    if (Object.keys(rawAttrsForMatcher).length > 0 && typeof jPath === 'object' && jPath.updateCurrent) {
+    // Update matcher ONCE before second pass, if applicable
+    if (hasRawAttrs && typeof jPath === 'object' && jPath.updateCurrent) {
       jPath.updateCurrent(rawAttrsForMatcher);
     }
 
-    // Second pass: now process attributes with matcher having full attribute context
+    // Hoist toString() once — path doesn't change during attribute processing
+    const jPathStr = this.options.jPath ? jPath.toString() : this.readonlyMatcher;
+
+    // Second pass: apply processors, build final attrs
+    let hasAttrs = false;
     for (let i = 0; i < len; i++) {
       const attrName = this.resolveNameSpace(matches[i][1]);
 
-      // Convert jPath to string if needed for ignoreAttributesFn
-      const jPathStr = this.options.jPath ? jPath.toString() : jPath;
-      if (this.ignoreAttributesFn(attrName, jPathStr)) {
-        continue
-      }
+      if (this.ignoreAttributesFn(attrName, jPathStr)) continue;
 
-      let oldVal = matches[i][4];
       let aName = this.options.attributeNamePrefix + attrName;
 
       if (attrName.length) {
         if (this.options.transformAttributeName) {
           aName = this.options.transformAttributeName(aName);
         }
-        //if (aName === "__proto__") aName = "#__proto__";
         aName = sanitizeName(aName, this.options);
 
-        if (oldVal !== undefined) {
-          if (this.options.trimValues) {
-            oldVal = oldVal.trim();
-          }
-          oldVal = this.replaceEntitiesValue(oldVal, tagName, jPath);
+        if (matches[i][4] !== undefined) {
+          // Reuse already-processed value — no double entity replacement
+          const oldVal = processedVals[i];
 
-          // Pass jPath string or matcher based on options.jPath setting
-          const jPathOrMatcher = this.options.jPath ? jPath.toString() : jPath;
-          const newVal = this.options.attributeValueProcessor(attrName, oldVal, jPathOrMatcher);
+          const newVal = this.options.attributeValueProcessor(attrName, oldVal, jPathStr);
           if (newVal === null || newVal === undefined) {
-            //don't parse
             attrs[aName] = oldVal;
           } else if (typeof newVal !== typeof oldVal || newVal !== oldVal) {
-            //overwrite
             attrs[aName] = newVal;
           } else {
-            //parse
-            attrs[aName] = parseValue(
-              oldVal,
-              this.options.parseAttributeValue,
-              this.options.numberParseOptions
-            );
+            attrs[aName] = parseValue(oldVal, this.options.parseAttributeValue, this.options.numberParseOptions);
           }
+          hasAttrs = true;
         } else if (this.options.allowBooleanAttributes) {
           attrs[aName] = true;
+          hasAttrs = true;
         }
       }
     }
 
-    if (!Object.keys(attrs).length) {
-      return;
-    }
+    if (!hasAttrs) return;
+
     if (this.options.attributesGroupName) {
       const attrCollection = {};
       attrCollection[this.options.attributesGroupName] = attrs;
       return attrCollection;
     }
-    return attrs
+    return attrs;
   }
 }
-
 const parseXml = function (xmlData) {
   xmlData = xmlData.replace(/\r\n?/g, "\n"); //TODO: remove this line
   const xmlObj = new XmlNode('!xml');
@@ -55476,7 +55633,7 @@ const parseXml = function (xmlData) {
         tagName = transformTagName(this.options.transformTagName, tagName, "", this.options).tagName;
 
         if (currentNode) {
-          textData = this.saveTextToParentTag(textData, currentNode, this.matcher);
+          textData = this.saveTextToParentTag(textData, currentNode, this.readonlyMatcher);
         }
 
         //check if last tag of nested tag was unpaired tag
@@ -55501,7 +55658,7 @@ const parseXml = function (xmlData) {
         let tagData = readTagExp(xmlData, i, false, "?>");
         if (!tagData) throw new Error("Pi Tag is not closed.");
 
-        textData = this.saveTextToParentTag(textData, currentNode, this.matcher);
+        textData = this.saveTextToParentTag(textData, currentNode, this.readonlyMatcher);
         if ((this.options.ignoreDeclaration && tagData.tagName === "?xml") || this.options.ignorePiTags) ; else {
 
           const childNode = new XmlNode(tagData.tagName);
@@ -55510,7 +55667,7 @@ const parseXml = function (xmlData) {
           if (tagData.tagName !== tagData.tagExp && tagData.attrExpPresent) {
             childNode[":@"] = this.buildAttributesMap(tagData.tagExp, this.matcher, tagData.tagName);
           }
-          this.addChild(currentNode, childNode, this.matcher, i);
+          this.addChild(currentNode, childNode, this.readonlyMatcher, i);
         }
 
 
@@ -55520,7 +55677,7 @@ const parseXml = function (xmlData) {
         if (this.options.commentPropName) {
           const comment = xmlData.substring(i + 4, endIndex - 2);
 
-          textData = this.saveTextToParentTag(textData, currentNode, this.matcher);
+          textData = this.saveTextToParentTag(textData, currentNode, this.readonlyMatcher);
 
           currentNode.add(this.options.commentPropName, [{ [this.options.textNodeName]: comment }]);
         }
@@ -55533,9 +55690,9 @@ const parseXml = function (xmlData) {
         const closeIndex = findClosingIndex(xmlData, "]]>", i, "CDATA is not closed.") - 2;
         const tagExp = xmlData.substring(i + 9, closeIndex);
 
-        textData = this.saveTextToParentTag(textData, currentNode, this.matcher);
+        textData = this.saveTextToParentTag(textData, currentNode, this.readonlyMatcher);
 
-        let val = this.parseTextData(tagExp, currentNode.tagname, this.matcher, true, false, true, true);
+        let val = this.parseTextData(tagExp, currentNode.tagname, this.readonlyMatcher, true, false, true, true);
         if (val == undefined) val = "";
 
         //cdata should be set even if it is 0 length string
@@ -55577,7 +55734,7 @@ const parseXml = function (xmlData) {
         if (currentNode && textData) {
           if (currentNode.tagname !== '!xml') {
             //when nested tag is found
-            textData = this.saveTextToParentTag(textData, currentNode, this.matcher, false);
+            textData = this.saveTextToParentTag(textData, currentNode, this.readonlyMatcher, false);
           }
         }
 
@@ -55666,7 +55823,7 @@ const parseXml = function (xmlData) {
           this.matcher.pop(); // Pop the stop node tag
           this.isCurrentNodeStopNode = false; // Reset flag
 
-          this.addChild(currentNode, childNode, this.matcher, startIndex);
+          this.addChild(currentNode, childNode, this.readonlyMatcher, startIndex);
         } else {
           //selfClosing tag
           if (isSelfClosing) {
@@ -55676,7 +55833,7 @@ const parseXml = function (xmlData) {
             if (prefixedAttrs) {
               childNode[":@"] = prefixedAttrs;
             }
-            this.addChild(currentNode, childNode, this.matcher, startIndex);
+            this.addChild(currentNode, childNode, this.readonlyMatcher, startIndex);
             this.matcher.pop(); // Pop self-closing tag
             this.isCurrentNodeStopNode = false; // Reset flag
           }
@@ -55685,7 +55842,7 @@ const parseXml = function (xmlData) {
             if (prefixedAttrs) {
               childNode[":@"] = prefixedAttrs;
             }
-            this.addChild(currentNode, childNode, this.matcher, startIndex);
+            this.addChild(currentNode, childNode, this.readonlyMatcher, startIndex);
             this.matcher.pop(); // Pop unpaired tag
             this.isCurrentNodeStopNode = false; // Reset flag
             i = result.closeIndex;
@@ -55703,7 +55860,7 @@ const parseXml = function (xmlData) {
             if (prefixedAttrs) {
               childNode[":@"] = prefixedAttrs;
             }
-            this.addChild(currentNode, childNode, this.matcher, startIndex);
+            this.addChild(currentNode, childNode, this.readonlyMatcher, startIndex);
             currentNode = childNode;
           }
           textData = "";
@@ -55797,6 +55954,7 @@ function replaceEntitiesValue$1(val, tagName, jPath) {
       }
     }
   }
+  if (val.indexOf('&') === -1) return val;
   // Replace standard entities
   for (const entityName of Object.keys(this.lastEntities)) {
     const entity = this.lastEntities[entityName];
@@ -56080,18 +56238,17 @@ function stripAttributePrefix(attrs, prefix) {
  * @param {Matcher} matcher - Path matcher instance
  * @returns 
  */
-function prettify(node, options, matcher) {
-  return compress(node, options, matcher);
+function prettify(node, options, matcher, readonlyMatcher) {
+  return compress(node, options, matcher, readonlyMatcher);
 }
 
 /**
- * 
  * @param {array} arr 
  * @param {object} options 
  * @param {Matcher} matcher - Path matcher instance
  * @returns object
  */
-function compress(arr, options, matcher) {
+function compress(arr, options, matcher, readonlyMatcher) {
   let text;
   const compressedObj = {}; //This is intended to be a plain object
   for (let i = 0; i < arr.length; i++) {
@@ -56114,11 +56271,11 @@ function compress(arr, options, matcher) {
       continue;
     } else if (tagObj[property]) {
 
-      let val = compress(tagObj[property], options, matcher);
+      let val = compress(tagObj[property], options, matcher, readonlyMatcher);
       const isLeaf = isLeafTag(val, options);
 
       if (tagObj[":@"]) {
-        assignAttributes(val, tagObj[":@"], matcher, options);
+        assignAttributes(val, tagObj[":@"], readonlyMatcher, options);
       } else if (Object.keys(val).length === 1 && val[options.textNodeName] !== undefined && !options.alwaysCreateTextNode) {
         val = val[options.textNodeName];
       } else if (Object.keys(val).length === 0) {
@@ -56140,8 +56297,8 @@ function compress(arr, options, matcher) {
         //TODO: if a node is not an array, then check if it should be an array
         //also determine if it is a leaf node
 
-        // Pass jPath string or matcher based on options.jPath setting
-        const jPathOrMatcher = options.jPath ? matcher.toString() : matcher;
+        // Pass jPath string or readonlyMatcher based on options.jPath setting
+        const jPathOrMatcher = options.jPath ? readonlyMatcher.toString() : readonlyMatcher;
         if (options.isArray(property, jPathOrMatcher, isLeaf)) {
           compressedObj[property] = [val];
         } else {
@@ -56173,7 +56330,7 @@ function propName$1(obj) {
   }
 }
 
-function assignAttributes(obj, attrMap, matcher, options) {
+function assignAttributes(obj, attrMap, readonlyMatcher, options) {
   if (attrMap) {
     const keys = Object.keys(attrMap);
     const len = keys.length; //don't make it inline
@@ -56188,8 +56345,8 @@ function assignAttributes(obj, attrMap, matcher, options) {
       // For attributes, we need to create a temporary path
       // Pass jPath string or matcher based on options.jPath setting
       const jPathOrMatcher = options.jPath
-        ? matcher.toString() + "." + rawAttrName
-        : matcher;
+        ? readonlyMatcher.toString() + "." + rawAttrName
+        : readonlyMatcher;
 
       if (options.isArray(atrrName, jPathOrMatcher, true, true)) {
         obj[atrrName] = [attrMap[atrrName]];
@@ -56249,7 +56406,7 @@ class XMLParser {
         orderedObjParser.addExternalEntities(this.externalEntities);
         const orderedResult = orderedObjParser.parseXml(xmlData);
         if (this.options.preserveOrder || orderedResult === undefined) return orderedResult;
-        else return prettify(orderedResult, this.options, orderedObjParser.matcher);
+        else return prettify(orderedResult, this.options, orderedObjParser.matcher, orderedObjParser.readonlyMatcher);
     }
 
     /**
@@ -102785,7 +102942,7 @@ function require_setCacheAdd () {
  * @name has
  * @memberOf SetCache
  * @param {*} value The value to search for.
- * @returns {number} Returns `true` if `value` is found, else `false`.
+ * @returns {boolean} Returns `true` if `value` is found, else `false`.
  */
 
 var _setCacheHas;
@@ -115925,37 +116082,36 @@ function requireStreamx () {
 	const TextDecoder = requireTextDecoder();
 
 	// if we do a future major, expect queue microtask to be there always, for now a bit defensive
-	const qmt = typeof queueMicrotask === 'undefined' ? fn => commonjsGlobal.process.nextTick(fn) : queueMicrotask;
-
-	/* eslint-disable no-multi-spaces */
+	const qmt =
+	  typeof queueMicrotask === 'undefined' ? (fn) => commonjsGlobal.process.nextTick(fn) : queueMicrotask;
 
 	// 29 bits used total (4 from shared, 14 from read, and 11 from write)
-	const MAX = ((1 << 29) - 1);
+	const MAX = (1 << 29) - 1;
 
 	// Shared state
-	const OPENING       = 0b0001;
+	const OPENING = 0b0001;
 	const PREDESTROYING = 0b0010;
-	const DESTROYING    = 0b0100;
-	const DESTROYED     = 0b1000;
+	const DESTROYING = 0b0100;
+	const DESTROYED = 0b1000;
 
 	const NOT_OPENING = MAX ^ OPENING;
 	const NOT_PREDESTROYING = MAX ^ PREDESTROYING;
 
 	// Read state (4 bit offset from shared state)
-	const READ_ACTIVE           = 0b00000000000001 << 4;
-	const READ_UPDATING         = 0b00000000000010 << 4;
-	const READ_PRIMARY          = 0b00000000000100 << 4;
-	const READ_QUEUED           = 0b00000000001000 << 4;
-	const READ_RESUMED          = 0b00000000010000 << 4;
-	const READ_PIPE_DRAINED     = 0b00000000100000 << 4;
-	const READ_ENDING           = 0b00000001000000 << 4;
-	const READ_EMIT_DATA        = 0b00000010000000 << 4;
-	const READ_EMIT_READABLE    = 0b00000100000000 << 4;
+	const READ_ACTIVE = 0b00000000000001 << 4;
+	const READ_UPDATING = 0b00000000000010 << 4;
+	const READ_PRIMARY = 0b00000000000100 << 4;
+	const READ_QUEUED = 0b00000000001000 << 4;
+	const READ_RESUMED = 0b00000000010000 << 4;
+	const READ_PIPE_DRAINED = 0b00000000100000 << 4;
+	const READ_ENDING = 0b00000001000000 << 4;
+	const READ_EMIT_DATA = 0b00000010000000 << 4;
+	const READ_EMIT_READABLE = 0b00000100000000 << 4;
 	const READ_EMITTED_READABLE = 0b00001000000000 << 4;
-	const READ_DONE             = 0b00010000000000 << 4;
-	const READ_NEXT_TICK        = 0b00100000000000 << 4;
-	const READ_NEEDS_PUSH       = 0b01000000000000 << 4;
-	const READ_READ_AHEAD       = 0b10000000000000 << 4;
+	const READ_DONE = 0b00010000000000 << 4;
+	const READ_NEXT_TICK = 0b00100000000000 << 4;
+	const READ_NEEDS_PUSH = 0b01000000000000 << 4;
+	const READ_READ_AHEAD = 0b10000000000000 << 4;
 
 	// Combined read state
 	const READ_FLOWING = READ_RESUMED | READ_PIPE_DRAINED;
@@ -115964,40 +116120,40 @@ function requireStreamx () {
 	const READ_EMIT_READABLE_AND_QUEUED = READ_EMIT_READABLE | READ_QUEUED;
 	const READ_RESUMED_READ_AHEAD = READ_RESUMED | READ_READ_AHEAD;
 
-	const READ_NOT_ACTIVE             = MAX ^ READ_ACTIVE;
-	const READ_NON_PRIMARY            = MAX ^ READ_PRIMARY;
+	const READ_NOT_ACTIVE = MAX ^ READ_ACTIVE;
+	const READ_NON_PRIMARY = MAX ^ READ_PRIMARY;
 	const READ_NON_PRIMARY_AND_PUSHED = MAX ^ (READ_PRIMARY | READ_NEEDS_PUSH);
-	const READ_PUSHED                 = MAX ^ READ_NEEDS_PUSH;
-	const READ_PAUSED                 = MAX ^ READ_RESUMED;
-	const READ_NOT_QUEUED             = MAX ^ (READ_QUEUED | READ_EMITTED_READABLE);
-	const READ_NOT_ENDING             = MAX ^ READ_ENDING;
-	const READ_PIPE_NOT_DRAINED       = MAX ^ READ_FLOWING;
-	const READ_NOT_NEXT_TICK          = MAX ^ READ_NEXT_TICK;
-	const READ_NOT_UPDATING           = MAX ^ READ_UPDATING;
-	const READ_NO_READ_AHEAD          = MAX ^ READ_READ_AHEAD;
-	const READ_PAUSED_NO_READ_AHEAD   = MAX ^ READ_RESUMED_READ_AHEAD;
+	const READ_PUSHED = MAX ^ READ_NEEDS_PUSH;
+	const READ_PAUSED = MAX ^ READ_RESUMED;
+	const READ_NOT_QUEUED = MAX ^ (READ_QUEUED | READ_EMITTED_READABLE);
+	const READ_NOT_ENDING = MAX ^ READ_ENDING;
+	const READ_PIPE_NOT_DRAINED = MAX ^ READ_FLOWING;
+	const READ_NOT_NEXT_TICK = MAX ^ READ_NEXT_TICK;
+	const READ_NOT_UPDATING = MAX ^ READ_UPDATING;
+	const READ_NO_READ_AHEAD = MAX ^ READ_READ_AHEAD;
+	const READ_PAUSED_NO_READ_AHEAD = MAX ^ READ_RESUMED_READ_AHEAD;
 
 	// Write state (18 bit offset, 4 bit offset from shared state and 14 from read state)
-	const WRITE_ACTIVE     = 0b00000000001 << 18;
-	const WRITE_UPDATING   = 0b00000000010 << 18;
-	const WRITE_PRIMARY    = 0b00000000100 << 18;
-	const WRITE_QUEUED     = 0b00000001000 << 18;
-	const WRITE_UNDRAINED  = 0b00000010000 << 18;
-	const WRITE_DONE       = 0b00000100000 << 18;
+	const WRITE_ACTIVE = 0b00000000001 << 18;
+	const WRITE_UPDATING = 0b00000000010 << 18;
+	const WRITE_PRIMARY = 0b00000000100 << 18;
+	const WRITE_QUEUED = 0b00000001000 << 18;
+	const WRITE_UNDRAINED = 0b00000010000 << 18;
+	const WRITE_DONE = 0b00000100000 << 18;
 	const WRITE_EMIT_DRAIN = 0b00001000000 << 18;
-	const WRITE_NEXT_TICK  = 0b00010000000 << 18;
-	const WRITE_WRITING    = 0b00100000000 << 18;
-	const WRITE_FINISHING  = 0b01000000000 << 18;
-	const WRITE_CORKED     = 0b10000000000 << 18;
+	const WRITE_NEXT_TICK = 0b00010000000 << 18;
+	const WRITE_WRITING = 0b00100000000 << 18;
+	const WRITE_FINISHING = 0b01000000000 << 18;
+	const WRITE_CORKED = 0b10000000000 << 18;
 
-	const WRITE_NOT_ACTIVE    = MAX ^ (WRITE_ACTIVE | WRITE_WRITING);
-	const WRITE_NON_PRIMARY   = MAX ^ WRITE_PRIMARY;
+	const WRITE_NOT_ACTIVE = MAX ^ (WRITE_ACTIVE | WRITE_WRITING);
+	const WRITE_NON_PRIMARY = MAX ^ WRITE_PRIMARY;
 	const WRITE_NOT_FINISHING = MAX ^ (WRITE_ACTIVE | WRITE_FINISHING);
-	const WRITE_DRAINED       = MAX ^ WRITE_UNDRAINED;
-	const WRITE_NOT_QUEUED    = MAX ^ WRITE_QUEUED;
+	const WRITE_DRAINED = MAX ^ WRITE_UNDRAINED;
+	const WRITE_NOT_QUEUED = MAX ^ WRITE_QUEUED;
 	const WRITE_NOT_NEXT_TICK = MAX ^ WRITE_NEXT_TICK;
-	const WRITE_NOT_UPDATING  = MAX ^ WRITE_UPDATING;
-	const WRITE_NOT_CORKED    = MAX ^ WRITE_CORKED;
+	const WRITE_NOT_UPDATING = MAX ^ WRITE_UPDATING;
+	const WRITE_NOT_CORKED = MAX ^ WRITE_CORKED;
 
 	// Combined shared state
 	const ACTIVE = READ_ACTIVE | WRITE_ACTIVE;
@@ -116016,7 +116172,8 @@ function requireStreamx () {
 	const READ_STATUS = OPEN_STATUS | READ_DONE | READ_QUEUED;
 	const READ_ENDING_STATUS = OPEN_STATUS | READ_ENDING | READ_QUEUED;
 	const READ_READABLE_STATUS = OPEN_STATUS | READ_EMIT_READABLE | READ_QUEUED | READ_EMITTED_READABLE;
-	const SHOULD_NOT_READ = OPEN_STATUS | READ_ACTIVE | READ_ENDING | READ_DONE | READ_NEEDS_PUSH | READ_READ_AHEAD;
+	const SHOULD_NOT_READ =
+	  OPEN_STATUS | READ_ACTIVE | READ_ENDING | READ_DONE | READ_NEEDS_PUSH | READ_READ_AHEAD;
 	const READ_BACKPRESSURE_STATUS = DESTROY_STATUS | READ_ENDING | READ_DONE;
 	const READ_UPDATE_SYNC_STATUS = READ_UPDATING | OPEN_STATUS | READ_NEXT_TICK | READ_PRIMARY;
 	const READ_NEXT_TICK_OR_OPENING = READ_NEXT_TICK | OPENING;
@@ -116037,7 +116194,10 @@ function requireStreamx () {
 	const asyncIterator = Symbol.asyncIterator || Symbol('asyncIterator');
 
 	class WritableState {
-	  constructor (stream, { highWaterMark = 16384, map = null, mapWritable, byteLength, byteLengthWritable } = {}) {
+	  constructor(
+	    stream,
+	    { highWaterMark = 16384, map = null, mapWritable, byteLength, byteLengthWritable } = {}
+	  ) {
 	    this.stream = stream;
 	    this.queue = new FIFO();
 	    this.highWaterMark = highWaterMark;
@@ -116051,11 +116211,15 @@ function requireStreamx () {
 	    this.afterUpdateNextTick = updateWriteNT.bind(this);
 	  }
 
-	  get ended () {
+	  get ending() {
+	    return (this.stream._duplexState & WRITE_FINISHING) !== 0
+	  }
+
+	  get ended() {
 	    return (this.stream._duplexState & WRITE_DONE) !== 0
 	  }
 
-	  push (data) {
+	  push(data) {
 	    if ((this.stream._duplexState & WRITE_DROP_DATA) !== 0) return false
 	    if (this.map !== null) data = this.map(data);
 
@@ -116071,7 +116235,7 @@ function requireStreamx () {
 	    return false
 	  }
 
-	  shift () {
+	  shift() {
 	    const data = this.queue.shift();
 
 	    this.buffered -= this.byteLength(data);
@@ -116080,13 +116244,13 @@ function requireStreamx () {
 	    return data
 	  }
 
-	  end (data) {
+	  end(data) {
 	    if (typeof data === 'function') this.stream.once('finish', data);
 	    else if (data !== undefined && data !== null) this.push(data);
 	    this.stream._duplexState = (this.stream._duplexState | WRITE_FINISHING) & WRITE_NON_PRIMARY;
 	  }
 
-	  autoBatch (data, cb) {
+	  autoBatch(data, cb) {
 	    const buffer = [];
 	    const stream = this.stream;
 
@@ -116099,7 +116263,7 @@ function requireStreamx () {
 	    stream._writev(buffer, cb);
 	  }
 
-	  update () {
+	  update() {
 	    const stream = this.stream;
 
 	    stream._duplexState |= WRITE_UPDATING;
@@ -116117,7 +116281,7 @@ function requireStreamx () {
 	    stream._duplexState &= WRITE_NOT_UPDATING;
 	  }
 
-	  updateNonPrimary () {
+	  updateNonPrimary() {
 	    const stream = this.stream;
 
 	    if ((stream._duplexState & WRITE_FINISHING_STATUS) === WRITE_FINISHING) {
@@ -116140,18 +116304,18 @@ function requireStreamx () {
 	    }
 	  }
 
-	  continueUpdate () {
+	  continueUpdate() {
 	    if ((this.stream._duplexState & WRITE_NEXT_TICK) === 0) return false
 	    this.stream._duplexState &= WRITE_NOT_NEXT_TICK;
 	    return true
 	  }
 
-	  updateCallback () {
+	  updateCallback() {
 	    if ((this.stream._duplexState & WRITE_UPDATE_SYNC_STATUS) === WRITE_PRIMARY) this.update();
 	    else this.updateNextTick();
 	  }
 
-	  updateNextTick () {
+	  updateNextTick() {
 	    if ((this.stream._duplexState & WRITE_NEXT_TICK) !== 0) return
 	    this.stream._duplexState |= WRITE_NEXT_TICK;
 	    if ((this.stream._duplexState & WRITE_UPDATING) === 0) qmt(this.afterUpdateNextTick);
@@ -116159,7 +116323,10 @@ function requireStreamx () {
 	}
 
 	class ReadableState {
-	  constructor (stream, { highWaterMark = 16384, map = null, mapReadable, byteLength, byteLengthReadable } = {}) {
+	  constructor(
+	    stream,
+	    { highWaterMark = 16384, map = null, mapReadable, byteLength, byteLengthReadable } = {}
+	  ) {
 	    this.stream = stream;
 	    this.queue = new FIFO();
 	    this.highWaterMark = highWaterMark === 0 ? 1 : highWaterMark;
@@ -116174,11 +116341,15 @@ function requireStreamx () {
 	    this.afterUpdateNextTick = updateReadNT.bind(this);
 	  }
 
-	  get ended () {
+	  get ending() {
+	    return (this.stream._duplexState & READ_ENDING) !== 0
+	  }
+
+	  get ended() {
 	    return (this.stream._duplexState & READ_DONE) !== 0
 	  }
 
-	  pipe (pipeTo, cb) {
+	  pipe(pipeTo, cb) {
 	    if (this.pipeTo !== null) throw new Error('Can only pipe to one destination')
 	    if (typeof cb !== 'function') cb = null;
 
@@ -116205,7 +116376,7 @@ function requireStreamx () {
 	    pipeTo.emit('pipe', this.stream);
 	  }
 
-	  push (data) {
+	  push(data) {
 	    const stream = this.stream;
 
 	    if (data === null) {
@@ -116230,7 +116401,7 @@ function requireStreamx () {
 	    return this.buffered < this.highWaterMark
 	  }
 
-	  shift () {
+	  shift() {
 	    const data = this.queue.shift();
 
 	    this.buffered -= this.byteLength(data);
@@ -116238,7 +116409,7 @@ function requireStreamx () {
 	    return data
 	  }
 
-	  unshift (data) {
+	  unshift(data) {
 	    const pending = [this.map !== null ? this.map(data) : data];
 	    while (this.buffered > 0) pending.push(this.shift());
 
@@ -116251,12 +116422,13 @@ function requireStreamx () {
 	    this.push(pending[pending.length - 1]);
 	  }
 
-	  read () {
+	  read() {
 	    const stream = this.stream;
 
 	    if ((stream._duplexState & READ_STATUS) === READ_QUEUED) {
 	      const data = this.shift();
-	      if (this.pipeTo !== null && this.pipeTo.write(data) === false) stream._duplexState &= READ_PIPE_NOT_DRAINED;
+	      if (this.pipeTo !== null && this.pipeTo.write(data) === false)
+	        stream._duplexState &= READ_PIPE_NOT_DRAINED;
 	      if ((stream._duplexState & READ_EMIT_DATA) !== 0) stream.emit('data', data);
 	      return data
 	    }
@@ -116269,17 +116441,21 @@ function requireStreamx () {
 	    return null
 	  }
 
-	  drain () {
+	  drain() {
 	    const stream = this.stream;
 
-	    while ((stream._duplexState & READ_STATUS) === READ_QUEUED && (stream._duplexState & READ_FLOWING) !== 0) {
+	    while (
+	      (stream._duplexState & READ_STATUS) === READ_QUEUED &&
+	      (stream._duplexState & READ_FLOWING) !== 0
+	    ) {
 	      const data = this.shift();
-	      if (this.pipeTo !== null && this.pipeTo.write(data) === false) stream._duplexState &= READ_PIPE_NOT_DRAINED;
+	      if (this.pipeTo !== null && this.pipeTo.write(data) === false)
+	        stream._duplexState &= READ_PIPE_NOT_DRAINED;
 	      if ((stream._duplexState & READ_EMIT_DATA) !== 0) stream.emit('data', data);
 	    }
 	  }
 
-	  update () {
+	  update() {
 	    const stream = this.stream;
 
 	    stream._duplexState |= READ_UPDATING;
@@ -116287,7 +116463,10 @@ function requireStreamx () {
 	    do {
 	      this.drain();
 
-	      while (this.buffered < this.highWaterMark && (stream._duplexState & SHOULD_NOT_READ) === READ_READ_AHEAD) {
+	      while (
+	        this.buffered < this.highWaterMark &&
+	        (stream._duplexState & SHOULD_NOT_READ) === READ_READ_AHEAD
+	      ) {
 	        stream._duplexState |= READ_ACTIVE_AND_NEEDS_PUSH;
 	        stream._read(this.afterRead);
 	        this.drain();
@@ -116304,7 +116483,7 @@ function requireStreamx () {
 	    stream._duplexState &= READ_NOT_UPDATING;
 	  }
 
-	  updateNonPrimary () {
+	  updateNonPrimary() {
 	    const stream = this.stream;
 
 	    if ((stream._duplexState & READ_ENDING_STATUS) === READ_ENDING) {
@@ -116328,24 +116507,24 @@ function requireStreamx () {
 	    }
 	  }
 
-	  continueUpdate () {
+	  continueUpdate() {
 	    if ((this.stream._duplexState & READ_NEXT_TICK) === 0) return false
 	    this.stream._duplexState &= READ_NOT_NEXT_TICK;
 	    return true
 	  }
 
-	  updateCallback () {
+	  updateCallback() {
 	    if ((this.stream._duplexState & READ_UPDATE_SYNC_STATUS) === READ_PRIMARY) this.update();
 	    else this.updateNextTick();
 	  }
 
-	  updateNextTickIfOpen () {
+	  updateNextTickIfOpen() {
 	    if ((this.stream._duplexState & READ_NEXT_TICK_OR_OPENING) !== 0) return
 	    this.stream._duplexState |= READ_NEXT_TICK;
 	    if ((this.stream._duplexState & READ_UPDATING) === 0) qmt(this.afterUpdateNextTick);
 	  }
 
-	  updateNextTick () {
+	  updateNextTick() {
 	    if ((this.stream._duplexState & READ_NEXT_TICK) !== 0) return
 	    this.stream._duplexState |= READ_NEXT_TICK;
 	    if ((this.stream._duplexState & READ_UPDATING) === 0) qmt(this.afterUpdateNextTick);
@@ -116353,7 +116532,7 @@ function requireStreamx () {
 	}
 
 	class TransformState {
-	  constructor (stream) {
+	  constructor(stream) {
 	    this.data = null;
 	    this.afterTransform = afterTransform.bind(stream);
 	    this.afterFinal = null;
@@ -116361,7 +116540,7 @@ function requireStreamx () {
 	}
 
 	class Pipeline {
-	  constructor (src, dst, cb) {
+	  constructor(src, dst, cb) {
 	    this.from = src;
 	    this.to = dst;
 	    this.afterPipe = cb;
@@ -116369,11 +116548,11 @@ function requireStreamx () {
 	    this.pipeToFinished = false;
 	  }
 
-	  finished () {
+	  finished() {
 	    this.pipeToFinished = true;
 	  }
 
-	  done (stream, err) {
+	  done(stream, err) {
 	    if (err) this.error = err;
 
 	    if (stream === this.to) {
@@ -116403,12 +116582,12 @@ function requireStreamx () {
 	  }
 	}
 
-	function afterDrain () {
+	function afterDrain() {
 	  this.stream._duplexState |= READ_PIPE_DRAINED;
 	  this.updateCallback();
 	}
 
-	function afterFinal (err) {
+	function afterFinal(err) {
 	  const stream = this.stream;
 	  if (err) stream.destroy(err);
 	  if ((stream._duplexState & DESTROY_STATUS) === 0) {
@@ -116426,7 +116605,7 @@ function requireStreamx () {
 	  else this.updateNextTick();
 	}
 
-	function afterDestroy (err) {
+	function afterDestroy(err) {
 	  const stream = this.stream;
 
 	  if (!err && this.error !== STREAM_DESTROYED) err = this.error;
@@ -116445,7 +116624,7 @@ function requireStreamx () {
 	  }
 	}
 
-	function afterWrite (err) {
+	function afterWrite(err) {
 	  const stream = this.stream;
 
 	  if (err) stream.destroy(err);
@@ -116463,28 +116642,29 @@ function requireStreamx () {
 	  this.updateCallback();
 	}
 
-	function afterRead (err) {
+	function afterRead(err) {
 	  if (err) this.stream.destroy(err);
 	  this.stream._duplexState &= READ_NOT_ACTIVE;
-	  if (this.readAhead === false && (this.stream._duplexState & READ_RESUMED) === 0) this.stream._duplexState &= READ_NO_READ_AHEAD;
+	  if (this.readAhead === false && (this.stream._duplexState & READ_RESUMED) === 0)
+	    this.stream._duplexState &= READ_NO_READ_AHEAD;
 	  this.updateCallback();
 	}
 
-	function updateReadNT () {
+	function updateReadNT() {
 	  if ((this.stream._duplexState & READ_UPDATING) === 0) {
 	    this.stream._duplexState &= READ_NOT_NEXT_TICK;
 	    this.update();
 	  }
 	}
 
-	function updateWriteNT () {
+	function updateWriteNT() {
 	  if ((this.stream._duplexState & WRITE_UPDATING) === 0) {
 	    this.stream._duplexState &= WRITE_NOT_NEXT_TICK;
 	    this.update();
 	  }
 	}
 
-	function tickDrains (drains) {
+	function tickDrains(drains) {
 	  for (let i = 0; i < drains.length; i++) {
 	    // drains.writes are monotonic, so if one is 0 its always the first one
 	    if (--drains[i].writes === 0) {
@@ -116494,7 +116674,7 @@ function requireStreamx () {
 	  }
 	}
 
-	function afterOpen (err) {
+	function afterOpen(err) {
 	  const stream = this.stream;
 
 	  if (err) stream.destroy(err);
@@ -116516,15 +116696,15 @@ function requireStreamx () {
 	  }
 	}
 
-	function afterTransform (err, data) {
+	function afterTransform(err, data) {
 	  if (data !== undefined && data !== null) this.push(data);
 	  this._writableState.afterWrite(err);
 	}
 
-	function newListener (name) {
+	function newListener(name) {
 	  if (this._readableState !== null) {
 	    if (name === 'data') {
-	      this._duplexState |= (READ_EMIT_DATA | READ_RESUMED_READ_AHEAD);
+	      this._duplexState |= READ_EMIT_DATA | READ_RESUMED_READ_AHEAD;
 	      this._readableState.updateNextTick();
 	    }
 	    if (name === 'readable') {
@@ -116542,7 +116722,7 @@ function requireStreamx () {
 	}
 
 	class Stream extends EventEmitter {
-	  constructor (opts) {
+	  constructor(opts) {
 	    super();
 
 	    this._duplexState = 0;
@@ -116561,35 +116741,35 @@ function requireStreamx () {
 	    this.on('newListener', newListener);
 	  }
 
-	  _open (cb) {
+	  _open(cb) {
 	    cb(null);
 	  }
 
-	  _destroy (cb) {
+	  _destroy(cb) {
 	    cb(null);
 	  }
 
-	  _predestroy () {
+	  _predestroy() {
 	    // does nothing
 	  }
 
-	  get readable () {
+	  get readable() {
 	    return this._readableState !== null ? true : undefined
 	  }
 
-	  get writable () {
+	  get writable() {
 	    return this._writableState !== null ? true : undefined
 	  }
 
-	  get destroyed () {
+	  get destroyed() {
 	    return (this._duplexState & DESTROYED) !== 0
 	  }
 
-	  get destroying () {
+	  get destroying() {
 	    return (this._duplexState & DESTROY_STATUS) !== 0
 	  }
 
-	  destroy (err) {
+	  destroy(err) {
 	    if ((this._duplexState & DESTROY_STATUS) === 0) {
 	      if (!err) err = STREAM_DESTROYED;
 	      this._duplexState = (this._duplexState | DESTROYING) & NON_PRIMARY;
@@ -116614,7 +116794,7 @@ function requireStreamx () {
 	}
 
 	class Readable extends Stream {
-	  constructor (opts) {
+	  constructor(opts) {
 	    super(opts);
 
 	    this._duplexState |= OPENING | WRITE_DONE | READ_READ_AHEAD;
@@ -116628,66 +116808,67 @@ function requireStreamx () {
 	    }
 	  }
 
-	  setEncoding (encoding) {
+	  setEncoding(encoding) {
 	    const dec = new TextDecoder(encoding);
 	    const map = this._readableState.map || echo;
 	    this._readableState.map = mapOrSkip;
 	    return this
 
-	    function mapOrSkip (data) {
+	    function mapOrSkip(data) {
 	      const next = dec.push(data);
 	      return next === '' && (data.byteLength !== 0 || dec.remaining > 0) ? null : map(next)
 	    }
 	  }
 
-	  _read (cb) {
+	  _read(cb) {
 	    cb(null);
 	  }
 
-	  pipe (dest, cb) {
+	  pipe(dest, cb) {
 	    this._readableState.updateNextTick();
 	    this._readableState.pipe(dest, cb);
 	    return dest
 	  }
 
-	  read () {
+	  read() {
 	    this._readableState.updateNextTick();
 	    return this._readableState.read()
 	  }
 
-	  push (data) {
+	  push(data) {
 	    this._readableState.updateNextTickIfOpen();
 	    return this._readableState.push(data)
 	  }
 
-	  unshift (data) {
+	  unshift(data) {
 	    this._readableState.updateNextTickIfOpen();
 	    return this._readableState.unshift(data)
 	  }
 
-	  resume () {
+	  resume() {
 	    this._duplexState |= READ_RESUMED_READ_AHEAD;
 	    this._readableState.updateNextTick();
 	    return this
 	  }
 
-	  pause () {
-	    this._duplexState &= (this._readableState.readAhead === false ? READ_PAUSED_NO_READ_AHEAD : READ_PAUSED);
+	  pause() {
+	    this._duplexState &=
+	      this._readableState.readAhead === false ? READ_PAUSED_NO_READ_AHEAD : READ_PAUSED;
 	    return this
 	  }
 
-	  static _fromAsyncIterator (ite, opts) {
+	  static _fromAsyncIterator(ite, opts) {
 	    let destroy;
 
 	    const rs = new Readable({
 	      ...opts,
-	      read (cb) {
+	      read(cb) {
 	        ite.next().then(push).then(cb.bind(null, null)).catch(cb);
 	      },
-	      predestroy () {
+	      predestroy() {
 	        destroy = ite.return();
 	      },
-	      destroy (cb) {
+	      destroy(cb) {
 	        if (!destroy) return cb(null)
 	        destroy.then(cb.bind(null, null)).catch(cb);
 	      }
@@ -116695,13 +116876,13 @@ function requireStreamx () {
 
 	    return rs
 
-	    function push (data) {
+	    function push(data) {
 	      if (data.done) rs.push(null);
 	      else rs.push(data.value);
 	    }
 	  }
 
-	  static from (data, opts) {
+	  static from(data, opts) {
 	    if (isReadStreamx(data)) return data
 	    if (data[asyncIterator]) return this._fromAsyncIterator(data[asyncIterator](), opts)
 	    if (!Array.isArray(data)) data = data === undefined ? [] : [data];
@@ -116709,37 +116890,42 @@ function requireStreamx () {
 	    let i = 0;
 	    return new Readable({
 	      ...opts,
-	      read (cb) {
+	      read(cb) {
 	        this.push(i === data.length ? null : data[i++]);
 	        cb(null);
 	      }
 	    })
 	  }
 
-	  static isBackpressured (rs) {
-	    return (rs._duplexState & READ_BACKPRESSURE_STATUS) !== 0 || rs._readableState.buffered >= rs._readableState.highWaterMark
+	  static isBackpressured(rs) {
+	    return (
+	      (rs._duplexState & READ_BACKPRESSURE_STATUS) !== 0 ||
+	      rs._readableState.buffered >= rs._readableState.highWaterMark
+	    )
 	  }
 
-	  static isPaused (rs) {
+	  static isPaused(rs) {
 	    return (rs._duplexState & READ_RESUMED) === 0
 	  }
 
-	  [asyncIterator] () {
+	  [asyncIterator]() {
 	    const stream = this;
 
 	    let error = null;
 	    let promiseResolve = null;
 	    let promiseReject = null;
 
-	    this.on('error', (err) => { error = err; });
+	    this.on('error', (err) => {
+	      error = err;
+	    });
 	    this.on('readable', onreadable);
 	    this.on('close', onclose);
 
 	    return {
-	      [asyncIterator] () {
+	      [asyncIterator]() {
 	        return this
 	      },
-	      next () {
+	      next() {
 	        return new Promise(function (resolve, reject) {
 	          promiseResolve = resolve;
 	          promiseReject = reject;
@@ -116748,31 +116934,32 @@ function requireStreamx () {
 	          else if ((stream._duplexState & DESTROYED) !== 0) ondata(null);
 	        })
 	      },
-	      return () {
+	      return() {
 	        return destroy(null)
 	      },
-	      throw (err) {
+	      throw(err) {
 	        return destroy(err)
 	      }
 	    }
 
-	    function onreadable () {
+	    function onreadable() {
 	      if (promiseResolve !== null) ondata(stream.read());
 	    }
 
-	    function onclose () {
+	    function onclose() {
 	      if (promiseResolve !== null) ondata(null);
 	    }
 
-	    function ondata (data) {
+	    function ondata(data) {
 	      if (promiseReject === null) return
 	      if (error) promiseReject(error);
-	      else if (data === null && (stream._duplexState & READ_DONE) === 0) promiseReject(STREAM_DESTROYED);
+	      else if (data === null && (stream._duplexState & READ_DONE) === 0)
+	        promiseReject(STREAM_DESTROYED);
 	      else promiseResolve({ value: data, done: data === null });
 	      promiseReject = promiseResolve = null;
 	    }
 
-	    function destroy (err) {
+	    function destroy(err) {
 	      stream.destroy(err);
 	      return new Promise((resolve, reject) => {
 	        if (stream._duplexState & DESTROYED) return resolve({ value: undefined, done: true })
@@ -116786,7 +116973,7 @@ function requireStreamx () {
 	}
 
 	class Writable extends Stream {
-	  constructor (opts) {
+	  constructor(opts) {
 	    super(opts);
 
 	    this._duplexState |= OPENING | READ_DONE;
@@ -116800,36 +116987,36 @@ function requireStreamx () {
 	    }
 	  }
 
-	  cork () {
+	  cork() {
 	    this._duplexState |= WRITE_CORKED;
 	  }
 
-	  uncork () {
+	  uncork() {
 	    this._duplexState &= WRITE_NOT_CORKED;
 	    this._writableState.updateNextTick();
 	  }
 
-	  _writev (batch, cb) {
+	  _writev(batch, cb) {
 	    cb(null);
 	  }
 
-	  _write (data, cb) {
+	  _write(data, cb) {
 	    this._writableState.autoBatch(data, cb);
 	  }
 
-	  _final (cb) {
+	  _final(cb) {
 	    cb(null);
 	  }
 
-	  static isBackpressured (ws) {
+	  static isBackpressured(ws) {
 	    return (ws._duplexState & WRITE_BACKPRESSURE_STATUS) !== 0
 	  }
 
-	  static drained (ws) {
+	  static drained(ws) {
 	    if (ws.destroyed) return Promise.resolve(false)
 	    const state = ws._writableState;
-	    const pending = (isWritev(ws) ? Math.min(1, state.queue.length) : state.queue.length);
-	    const writes = pending + ((ws._duplexState & WRITE_WRITING) ? 1 : 0);
+	    const pending = isWritev(ws) ? Math.min(1, state.queue.length) : state.queue.length;
+	    const writes = pending + (ws._duplexState & WRITE_WRITING ? 1 : 0);
 	    if (writes === 0) return Promise.resolve(true)
 	    if (state.drains === null) state.drains = [];
 	    return new Promise((resolve) => {
@@ -116837,20 +117024,21 @@ function requireStreamx () {
 	    })
 	  }
 
-	  write (data) {
+	  write(data) {
 	    this._writableState.updateNextTick();
 	    return this._writableState.push(data)
 	  }
 
-	  end (data) {
+	  end(data) {
 	    this._writableState.updateNextTick();
 	    this._writableState.end(data);
 	    return this
 	  }
 	}
 
-	class Duplex extends Readable { // and Writable
-	  constructor (opts) {
+	class Duplex extends Readable {
+	  // and Writable
+	  constructor(opts) {
 	    super(opts);
 
 	    this._duplexState = OPENING | (this._duplexState & READ_READ_AHEAD);
@@ -116863,33 +117051,33 @@ function requireStreamx () {
 	    }
 	  }
 
-	  cork () {
+	  cork() {
 	    this._duplexState |= WRITE_CORKED;
 	  }
 
-	  uncork () {
+	  uncork() {
 	    this._duplexState &= WRITE_NOT_CORKED;
 	    this._writableState.updateNextTick();
 	  }
 
-	  _writev (batch, cb) {
+	  _writev(batch, cb) {
 	    cb(null);
 	  }
 
-	  _write (data, cb) {
+	  _write(data, cb) {
 	    this._writableState.autoBatch(data, cb);
 	  }
 
-	  _final (cb) {
+	  _final(cb) {
 	    cb(null);
 	  }
 
-	  write (data) {
+	  write(data) {
 	    this._writableState.updateNextTick();
 	    return this._writableState.push(data)
 	  }
 
-	  end (data) {
+	  end(data) {
 	    this._writableState.updateNextTick();
 	    this._writableState.end(data);
 	    return this
@@ -116897,7 +117085,7 @@ function requireStreamx () {
 	}
 
 	class Transform extends Duplex {
-	  constructor (opts) {
+	  constructor(opts) {
 	    super(opts);
 	    this._transformState = new TransformState(this);
 
@@ -116907,7 +117095,7 @@ function requireStreamx () {
 	    }
 	  }
 
-	  _write (data, cb) {
+	  _write(data, cb) {
 	    if (this._readableState.buffered >= this._readableState.highWaterMark) {
 	      this._transformState.data = data;
 	    } else {
@@ -116915,7 +117103,7 @@ function requireStreamx () {
 	    }
 	  }
 
-	  _read (cb) {
+	  _read(cb) {
 	    if (this._transformState.data !== null) {
 	      const data = this._transformState.data;
 	      this._transformState.data = null;
@@ -116926,7 +117114,7 @@ function requireStreamx () {
 	    }
 	  }
 
-	  destroy (err) {
+	  destroy(err) {
 	    super.destroy(err);
 	    if (this._transformState.data !== null) {
 	      this._transformState.data = null;
@@ -116934,15 +117122,15 @@ function requireStreamx () {
 	    }
 	  }
 
-	  _transform (data, cb) {
+	  _transform(data, cb) {
 	    cb(null, data);
 	  }
 
-	  _flush (cb) {
+	  _flush(cb) {
 	    cb(null);
 	  }
 
-	  _final (cb) {
+	  _final(cb) {
 	    this._transformState.afterFinal = cb;
 	    this._flush(transformAfterFlush.bind(this));
 	  }
@@ -116950,7 +117138,7 @@ function requireStreamx () {
 
 	class PassThrough extends Transform {}
 
-	function transformAfterFlush (err, data) {
+	function transformAfterFlush(err, data) {
 	  const cb = this._transformState.afterFinal;
 	  if (err) return cb(err)
 	  if (data !== null && data !== undefined) this.push(data);
@@ -116958,7 +117146,7 @@ function requireStreamx () {
 	  cb(null);
 	}
 
-	function pipelinePromise (...streams) {
+	function pipelinePromise(...streams) {
 	  return new Promise((resolve, reject) => {
 	    return pipeline(...streams, (err) => {
 	      if (err) return reject(err)
@@ -116967,9 +117155,9 @@ function requireStreamx () {
 	  })
 	}
 
-	function pipeline (stream, ...streams) {
+	function pipeline(stream, ...streams) {
 	  const all = Array.isArray(stream) ? [...stream, ...streams] : [stream, ...streams];
-	  const done = (all.length && typeof all[all.length - 1] === 'function') ? all.pop() : null;
+	  const done = all.length && typeof all[all.length - 1] === 'function' ? all.pop() : null;
 
 	  if (all.length < 2) throw new Error('Pipeline requires at least 2 streams')
 
@@ -116993,7 +117181,8 @@ function requireStreamx () {
 	  if (done) {
 	    let fin = false;
 
-	    const autoDestroy = isStreamx(dest) || !!(dest._writableState && dest._writableState.autoDestroy);
+	    const autoDestroy =
+	      isStreamx(dest) || !!(dest._writableState && dest._writableState.autoDestroy);
 
 	    dest.on('error', (err) => {
 	      if (error === null) error = err;
@@ -117011,17 +117200,17 @@ function requireStreamx () {
 
 	  return dest
 
-	  function errorHandle (s, rd, wr, onerror) {
+	  function errorHandle(s, rd, wr, onerror) {
 	    s.on('error', onerror);
 	    s.on('close', onclose);
 
-	    function onclose () {
+	    function onclose() {
 	      if (s._readableState && !s._readableState.ended) return onerror(PREMATURE_CLOSE)
 	      if (wr && s._writableState && !s._writableState.ended) return onerror(PREMATURE_CLOSE)
 	    }
 	  }
 
-	  function onerror (err) {
+	  function onerror(err) {
 	    if (!err || error) return
 	    error = err;
 
@@ -117031,56 +117220,70 @@ function requireStreamx () {
 	  }
 	}
 
-	function echo (s) {
+	function echo(s) {
 	  return s
 	}
 
-	function isStream (stream) {
+	function isStream(stream) {
 	  return !!stream._readableState || !!stream._writableState
 	}
 
-	function isStreamx (stream) {
+	function isStreamx(stream) {
 	  return typeof stream._duplexState === 'number' && isStream(stream)
 	}
 
-	function isEnded (stream) {
+	function isEnding(stream) {
+	  return !!stream._readableState && stream._readableState.ending
+	}
+
+	function isEnded(stream) {
 	  return !!stream._readableState && stream._readableState.ended
 	}
 
-	function isFinished (stream) {
+	function isFinishing(stream) {
+	  return !!stream._writableState && stream._writableState.ending
+	}
+
+	function isFinished(stream) {
 	  return !!stream._writableState && stream._writableState.ended
 	}
 
-	function getStreamError (stream, opts = {}) {
-	  const err = (stream._readableState && stream._readableState.error) || (stream._writableState && stream._writableState.error);
+	function getStreamError(stream, opts = {}) {
+	  const err =
+	    (stream._readableState && stream._readableState.error) ||
+	    (stream._writableState && stream._writableState.error);
 
 	  // avoid implicit errors by default
-	  return (!opts.all && err === STREAM_DESTROYED) ? null : err
+	  return !opts.all && err === STREAM_DESTROYED ? null : err
 	}
 
-	function isReadStreamx (stream) {
+	function isReadStreamx(stream) {
 	  return isStreamx(stream) && stream.readable
 	}
 
-	function isDisturbed (stream) {
-	  return (stream._duplexState & OPENING) !== OPENING || (stream._duplexState & ACTIVE_OR_TICKING) !== 0
+	function isDisturbed(stream) {
+	  return (
+	    (stream._duplexState & OPENING) !== OPENING ||
+	    (stream._duplexState & DESTROYING) === DESTROYING ||
+	    (stream._duplexState & ACTIVE_OR_TICKING) !== 0
+	  )
 	}
 
-	function isTypedArray (data) {
+	function isTypedArray(data) {
 	  return typeof data === 'object' && data !== null && typeof data.byteLength === 'number'
 	}
 
-	function defaultByteLength (data) {
+	function defaultByteLength(data) {
 	  return isTypedArray(data) ? data.byteLength : 1024
 	}
 
-	function noop () {}
+	function noop() {}
 
-	function abort () {
+	function abort() {
 	  this.destroy(new Error('Stream aborted.'));
 	}
 
-	function isWritev (s) {
+	function isWritev(s) {
 	  return s._writev !== Writable.prototype._writev && s._writev !== Duplex.prototype._writev
 	}
 
@@ -117089,7 +117292,9 @@ function requireStreamx () {
 	  pipelinePromise,
 	  isStream,
 	  isStreamx,
+	  isEnding,
 	  isEnded,
+	  isFinishing,
 	  isFinished,
 	  isDisturbed,
 	  getStreamError,

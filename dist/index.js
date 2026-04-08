@@ -25643,9 +25643,6 @@ function requirePermessageDeflate () {
 
 	  #options = {}
 
-	  /** @type {number} */
-	  #maxDecompressedSize
-
 	  /** @type {boolean} */
 	  #aborted = false
 
@@ -25654,12 +25651,10 @@ function requirePermessageDeflate () {
 
 	  /**
 	   * @param {Map<string, string>} extensions
-	   * @param {{ maxDecompressedMessageSize?: number }} [options]
 	   */
-	  constructor (extensions, options = {}) {
+	  constructor (extensions) {
 	    this.#options.serverNoContextTakeover = extensions.has('server_no_context_takeover');
 	    this.#options.serverMaxWindowBits = extensions.get('server_max_window_bits');
-	    this.#maxDecompressedSize = options.maxDecompressedMessageSize ?? kDefaultMaxDecompressedSize;
 	  }
 
 	  decompress (chunk, fin, callback) {
@@ -25701,7 +25696,7 @@ function requirePermessageDeflate () {
 
 	        this.#inflate[kLength] += data.length;
 
-	        if (this.#inflate[kLength] > this.#maxDecompressedSize) {
+	        if (this.#inflate[kLength] > kDefaultMaxDecompressedSize) {
 	          this.#aborted = true;
 	          this.#inflate.removeAllListeners();
 	          this.#inflate.destroy();
@@ -25794,23 +25789,18 @@ function requireReceiver () {
 	  /** @type {Map<string, PerMessageDeflate>} */
 	  #extensions
 
-	  /** @type {{ maxDecompressedMessageSize?: number }} */
-	  #options
-
 	  /**
 	   * @param {import('./websocket').WebSocket} ws
 	   * @param {Map<string, string>|null} extensions
-	   * @param {{ maxDecompressedMessageSize?: number }} [options]
 	   */
-	  constructor (ws, extensions, options = {}) {
+	  constructor (ws, extensions) {
 	    super();
 
 	    this.ws = ws;
 	    this.#extensions = extensions == null ? new Map() : extensions;
-	    this.#options = options;
 
 	    if (this.#extensions.has('permessage-deflate')) {
-	      this.#extensions.set('permessage-deflate', new PerMessageDeflate(extensions, options));
+	      this.#extensions.set('permessage-deflate', new PerMessageDeflate(extensions));
 	    }
 	  }
 
@@ -26353,9 +26343,6 @@ function requireWebsocket () {
 	  /** @type {SendQueue} */
 	  #sendQueue
 
-	  /** @type {{ maxDecompressedMessageSize?: number }} */
-	  #options
-
 	  /**
 	   * @param {string} url
 	   * @param {string|string[]} protocols
@@ -26428,11 +26415,6 @@ function requireWebsocket () {
 
 	    // 10. Set this's url to urlRecord.
 	    this[kWebSocketURL] = new URL(urlRecord.href);
-
-	    // Store options for later use (e.g., maxDecompressedMessageSize)
-	    this.#options = {
-	      maxDecompressedMessageSize: options.maxDecompressedMessageSize
-	    };
 
 	    // 11. Let client be this's relevant settings object.
 	    const client = environmentSettingsObject.settingsObject;
@@ -26752,7 +26734,7 @@ function requireWebsocket () {
 	    // once this happens, the connection is open
 	    this[kResponse] = response;
 
-	    const parser = new ByteParser(this, parsedExtensions, this.#options);
+	    const parser = new ByteParser(this, parsedExtensions);
 	    parser.on('drain', onParserDrain);
 	    parser.on('error', onParserError.bind(this));
 
@@ -26855,19 +26837,6 @@ function requireWebsocket () {
 	  {
 	    key: 'headers',
 	    converter: webidl.nullableConverter(webidl.converters.HeadersInit)
-	  },
-	  {
-	    key: 'maxDecompressedMessageSize',
-	    converter: webidl.nullableConverter((V) => {
-	      V = webidl.converters['unsigned long long'](V);
-	      if (V <= 0) {
-	        throw webidl.errors.exception({
-	          header: 'WebSocket constructor',
-	          message: 'maxDecompressedMessageSize must be greater than 0'
-	        })
-	      }
-	      return V
-	    })
 	  }
 	]);
 
@@ -34769,14 +34738,26 @@ const bigIntsStringify = /([\[:])?"(-?\d+)n"($|([\\n]|\s)*(\s|[\\n])*[,\}\]])/g;
 const noiseStringify =
   /([\[:])?("-?\d+n+)n("$|"([\\n]|\s)*(\s|[\\n])*[,\}\]])/g;
 
-/** @typedef {(key: string, value: any, context?: { source: string }) => any} Reviver */
+/**
+ * @typedef {(this: any, key: string | number | undefined, value: any) => any} Replacer
+ * @typedef {(key: string | number | undefined, value: any, context?: { source: string }) => any} Reviver
+ */
 
 /**
- * Function to serialize value to a JSON string.
- * Converts BigInt values to a custom format (strings with digits and "n" at the end) and then converts them to proper big integers in a JSON string.
- * @param {*} value - The value to convert to a JSON string.
- * @param {(Function|Array<string>|null)} [replacer] - A function that alters the behavior of the stringification process, or an array of strings to indicate properties to exclude.
- * @param {(string|number)} [space] - A string or number to specify indentation or pretty-printing.
+ * Converts a JavaScript value to a JSON string.
+ *
+ * Supports serialization of BigInt values using two strategies:
+ * 1. Custom format "123n" → "123" (universal fallback)
+ * 2. Native JSON.rawJSON() (Node.js 22+, fastest) when available
+ *
+ * All other values are serialized exactly like native JSON.stringify().
+ *
+ * @param {*} value The value to convert to a JSON string.
+ * @param {Replacer | Array<string | number> | null} [replacer]
+ *   A function that alters the behavior of the stringification process,
+ *   or an array of strings/numbers to indicate properties to exclude.
+ * @param {string | number} [space]
+ *   A string or number to specify indentation or pretty-printing.
  * @returns {string} The JSON string representation.
  */
 const JSONStringify = (value, replacer, space) => {
@@ -34799,8 +34780,7 @@ const JSONStringify = (value, replacer, space) => {
   const convertedToCustomJSON = originalStringify(
     value,
     (key, value) => {
-      const isNoise =
-        typeof value === "string" && Boolean(value.match(noiseValue));
+      const isNoise = typeof value === "string" && noiseValue.test(value);
 
       if (isNoise) return value.toString() + "n"; // Mark noise values with additional "n" to offset the deletion of one "n" during the processing
 
@@ -34821,32 +34801,69 @@ const JSONStringify = (value, replacer, space) => {
   return denoisedJSON;
 };
 
-/**
- * Support for JSON.parse's context.source feature detection.
- * @type {boolean}
- */
-const isContextSourceSupported = () =>
-  JSON.parse("1", (_, __, context) => !!context && context.source === "1");
+const featureCache = new Map();
 
 /**
- * Convert marked big numbers to BigInt
- * @type {Reviver}
+ * Detects if the current JSON.parse implementation supports the context.source feature.
+ *
+ * Uses toString() fingerprinting to cache results and automatically detect runtime
+ * replacements of JSON.parse (polyfills, mocks, etc.).
+ *
+ * @returns {boolean} true if context.source is supported, false otherwise.
+ */
+const isContextSourceSupported = () => {
+  const parseFingerprint = JSON.parse.toString();
+
+  if (featureCache.has(parseFingerprint)) {
+    return featureCache.get(parseFingerprint);
+  }
+
+  try {
+    const result = JSON.parse(
+      "1",
+      (_, __, context) => !!context?.source && context.source === "1",
+    );
+    featureCache.set(parseFingerprint, result);
+
+    return result;
+  } catch {
+    featureCache.set(parseFingerprint, false);
+
+    return false;
+  }
+};
+
+/**
+ * Reviver function that converts custom-format BigInt strings back to BigInt values.
+ * Also handles "noise" strings that accidentally match the BigInt format.
+ *
+ * @param {string | number | undefined} key The object key.
+ * @param {*} value The value being parsed.
+ * @param {object} [context] Parse context (if supported by JSON.parse).
+ * @param {Reviver} [userReviver] User's custom reviver function.
+ * @returns {any} The transformed value.
  */
 const convertMarkedBigIntsReviver = (key, value, context, userReviver) => {
   const isCustomFormatBigInt =
-    typeof value === "string" && value.match(customFormat);
+    typeof value === "string" && customFormat.test(value);
   if (isCustomFormatBigInt) return BigInt(value.slice(0, -1));
 
-  const isNoiseValue = typeof value === "string" && value.match(noiseValue);
+  const isNoiseValue = typeof value === "string" && noiseValue.test(value);
   if (isNoiseValue) return value.slice(0, -1);
 
   return value;
 };
 
 /**
- * Faster (2x) and simpler function to parse JSON.
- * Based on JSON.parse's context.source feature, which is not universally available now.
- * Does not support the legacy custom format, used in the first version of this library.
+ * Fast JSON.parse implementation (~2x faster than classic fallback).
+ * Uses JSON.parse's context.source feature to detect integers and convert
+ * large numbers directly to BigInt without string manipulation.
+ *
+ * Does not support legacy custom format from v1 of this library.
+ *
+ * @param {string} text JSON string to parse.
+ * @param {Reviver} [reviver] Transform function to apply to each value.
+ * @returns {any} Parsed JavaScript value.
  */
 const JSONParseV2 = (text, reviver) => {
   return JSON.parse(text, (key, value, context) => {
@@ -34869,9 +34886,21 @@ const stringsOrLargeNumbers =
 const noiseValueWithQuotes = /^"-?\d+n+"$/; // Noise - strings that match the custom format before being converted to it
 
 /**
- * Function to parse JSON.
- * If JSON has number values greater than Number.MAX_SAFE_INTEGER, we convert those values to a custom format, then parse them to BigInt values.
- * Other types of values are not affected and parsed as native JSON.parse() would parse them.
+ * Converts a JSON string into a JavaScript value.
+ *
+ * Supports parsing of large integers using two strategies:
+ * 1. Classic fallback: Marks large numbers with "123n" format, then converts to BigInt
+ * 2. Fast path (JSONParseV2): Uses context.source feature (~2x faster) when available
+ *
+ * All other JSON values are parsed exactly like native JSON.parse().
+ *
+ * @param {string} text A valid JSON string.
+ * @param {Reviver} [reviver]
+ *   A function that transforms the results. This function is called for each member
+ *   of the object. If a member contains nested objects, the nested objects are
+ *   transformed before the parent object is.
+ * @returns {any} The parsed JavaScript value.
+ * @throws {SyntaxError} If text is not valid JSON.
  */
 const JSONParse = (text, reviver) => {
   if (!text) return originalParse(text, reviver);
@@ -34883,7 +34912,7 @@ const JSONParse = (text, reviver) => {
     stringsOrLargeNumbers,
     (text, digits, fractional, exponential) => {
       const isString = text[0] === '"';
-      const isNoise = isString && Boolean(text.match(noiseValueWithQuotes));
+      const isNoise = isString && noiseValueWithQuotes.test(text);
 
       if (isNoise) return text.substring(0, text.length - 1) + 'n"'; // Mark noise values with additional "n" to offset the deletion of one "n" during the processing
 
@@ -66037,7 +66066,7 @@ function require_setCacheAdd () {
  * @name has
  * @memberOf SetCache
  * @param {*} value The value to search for.
- * @returns {number} Returns `true` if `value` is found, else `false`.
+ * @returns {boolean} Returns `true` if `value` is found, else `false`.
  */
 
 var _setCacheHas;
@@ -79177,37 +79206,36 @@ function requireStreamx () {
 	const TextDecoder = requireTextDecoder();
 
 	// if we do a future major, expect queue microtask to be there always, for now a bit defensive
-	const qmt = typeof queueMicrotask === 'undefined' ? fn => commonjsGlobal.process.nextTick(fn) : queueMicrotask;
-
-	/* eslint-disable no-multi-spaces */
+	const qmt =
+	  typeof queueMicrotask === 'undefined' ? (fn) => commonjsGlobal.process.nextTick(fn) : queueMicrotask;
 
 	// 29 bits used total (4 from shared, 14 from read, and 11 from write)
-	const MAX = ((1 << 29) - 1);
+	const MAX = (1 << 29) - 1;
 
 	// Shared state
-	const OPENING       = 0b0001;
+	const OPENING = 0b0001;
 	const PREDESTROYING = 0b0010;
-	const DESTROYING    = 0b0100;
-	const DESTROYED     = 0b1000;
+	const DESTROYING = 0b0100;
+	const DESTROYED = 0b1000;
 
 	const NOT_OPENING = MAX ^ OPENING;
 	const NOT_PREDESTROYING = MAX ^ PREDESTROYING;
 
 	// Read state (4 bit offset from shared state)
-	const READ_ACTIVE           = 0b00000000000001 << 4;
-	const READ_UPDATING         = 0b00000000000010 << 4;
-	const READ_PRIMARY          = 0b00000000000100 << 4;
-	const READ_QUEUED           = 0b00000000001000 << 4;
-	const READ_RESUMED          = 0b00000000010000 << 4;
-	const READ_PIPE_DRAINED     = 0b00000000100000 << 4;
-	const READ_ENDING           = 0b00000001000000 << 4;
-	const READ_EMIT_DATA        = 0b00000010000000 << 4;
-	const READ_EMIT_READABLE    = 0b00000100000000 << 4;
+	const READ_ACTIVE = 0b00000000000001 << 4;
+	const READ_UPDATING = 0b00000000000010 << 4;
+	const READ_PRIMARY = 0b00000000000100 << 4;
+	const READ_QUEUED = 0b00000000001000 << 4;
+	const READ_RESUMED = 0b00000000010000 << 4;
+	const READ_PIPE_DRAINED = 0b00000000100000 << 4;
+	const READ_ENDING = 0b00000001000000 << 4;
+	const READ_EMIT_DATA = 0b00000010000000 << 4;
+	const READ_EMIT_READABLE = 0b00000100000000 << 4;
 	const READ_EMITTED_READABLE = 0b00001000000000 << 4;
-	const READ_DONE             = 0b00010000000000 << 4;
-	const READ_NEXT_TICK        = 0b00100000000000 << 4;
-	const READ_NEEDS_PUSH       = 0b01000000000000 << 4;
-	const READ_READ_AHEAD       = 0b10000000000000 << 4;
+	const READ_DONE = 0b00010000000000 << 4;
+	const READ_NEXT_TICK = 0b00100000000000 << 4;
+	const READ_NEEDS_PUSH = 0b01000000000000 << 4;
+	const READ_READ_AHEAD = 0b10000000000000 << 4;
 
 	// Combined read state
 	const READ_FLOWING = READ_RESUMED | READ_PIPE_DRAINED;
@@ -79216,40 +79244,40 @@ function requireStreamx () {
 	const READ_EMIT_READABLE_AND_QUEUED = READ_EMIT_READABLE | READ_QUEUED;
 	const READ_RESUMED_READ_AHEAD = READ_RESUMED | READ_READ_AHEAD;
 
-	const READ_NOT_ACTIVE             = MAX ^ READ_ACTIVE;
-	const READ_NON_PRIMARY            = MAX ^ READ_PRIMARY;
+	const READ_NOT_ACTIVE = MAX ^ READ_ACTIVE;
+	const READ_NON_PRIMARY = MAX ^ READ_PRIMARY;
 	const READ_NON_PRIMARY_AND_PUSHED = MAX ^ (READ_PRIMARY | READ_NEEDS_PUSH);
-	const READ_PUSHED                 = MAX ^ READ_NEEDS_PUSH;
-	const READ_PAUSED                 = MAX ^ READ_RESUMED;
-	const READ_NOT_QUEUED             = MAX ^ (READ_QUEUED | READ_EMITTED_READABLE);
-	const READ_NOT_ENDING             = MAX ^ READ_ENDING;
-	const READ_PIPE_NOT_DRAINED       = MAX ^ READ_FLOWING;
-	const READ_NOT_NEXT_TICK          = MAX ^ READ_NEXT_TICK;
-	const READ_NOT_UPDATING           = MAX ^ READ_UPDATING;
-	const READ_NO_READ_AHEAD          = MAX ^ READ_READ_AHEAD;
-	const READ_PAUSED_NO_READ_AHEAD   = MAX ^ READ_RESUMED_READ_AHEAD;
+	const READ_PUSHED = MAX ^ READ_NEEDS_PUSH;
+	const READ_PAUSED = MAX ^ READ_RESUMED;
+	const READ_NOT_QUEUED = MAX ^ (READ_QUEUED | READ_EMITTED_READABLE);
+	const READ_NOT_ENDING = MAX ^ READ_ENDING;
+	const READ_PIPE_NOT_DRAINED = MAX ^ READ_FLOWING;
+	const READ_NOT_NEXT_TICK = MAX ^ READ_NEXT_TICK;
+	const READ_NOT_UPDATING = MAX ^ READ_UPDATING;
+	const READ_NO_READ_AHEAD = MAX ^ READ_READ_AHEAD;
+	const READ_PAUSED_NO_READ_AHEAD = MAX ^ READ_RESUMED_READ_AHEAD;
 
 	// Write state (18 bit offset, 4 bit offset from shared state and 14 from read state)
-	const WRITE_ACTIVE     = 0b00000000001 << 18;
-	const WRITE_UPDATING   = 0b00000000010 << 18;
-	const WRITE_PRIMARY    = 0b00000000100 << 18;
-	const WRITE_QUEUED     = 0b00000001000 << 18;
-	const WRITE_UNDRAINED  = 0b00000010000 << 18;
-	const WRITE_DONE       = 0b00000100000 << 18;
+	const WRITE_ACTIVE = 0b00000000001 << 18;
+	const WRITE_UPDATING = 0b00000000010 << 18;
+	const WRITE_PRIMARY = 0b00000000100 << 18;
+	const WRITE_QUEUED = 0b00000001000 << 18;
+	const WRITE_UNDRAINED = 0b00000010000 << 18;
+	const WRITE_DONE = 0b00000100000 << 18;
 	const WRITE_EMIT_DRAIN = 0b00001000000 << 18;
-	const WRITE_NEXT_TICK  = 0b00010000000 << 18;
-	const WRITE_WRITING    = 0b00100000000 << 18;
-	const WRITE_FINISHING  = 0b01000000000 << 18;
-	const WRITE_CORKED     = 0b10000000000 << 18;
+	const WRITE_NEXT_TICK = 0b00010000000 << 18;
+	const WRITE_WRITING = 0b00100000000 << 18;
+	const WRITE_FINISHING = 0b01000000000 << 18;
+	const WRITE_CORKED = 0b10000000000 << 18;
 
-	const WRITE_NOT_ACTIVE    = MAX ^ (WRITE_ACTIVE | WRITE_WRITING);
-	const WRITE_NON_PRIMARY   = MAX ^ WRITE_PRIMARY;
+	const WRITE_NOT_ACTIVE = MAX ^ (WRITE_ACTIVE | WRITE_WRITING);
+	const WRITE_NON_PRIMARY = MAX ^ WRITE_PRIMARY;
 	const WRITE_NOT_FINISHING = MAX ^ (WRITE_ACTIVE | WRITE_FINISHING);
-	const WRITE_DRAINED       = MAX ^ WRITE_UNDRAINED;
-	const WRITE_NOT_QUEUED    = MAX ^ WRITE_QUEUED;
+	const WRITE_DRAINED = MAX ^ WRITE_UNDRAINED;
+	const WRITE_NOT_QUEUED = MAX ^ WRITE_QUEUED;
 	const WRITE_NOT_NEXT_TICK = MAX ^ WRITE_NEXT_TICK;
-	const WRITE_NOT_UPDATING  = MAX ^ WRITE_UPDATING;
-	const WRITE_NOT_CORKED    = MAX ^ WRITE_CORKED;
+	const WRITE_NOT_UPDATING = MAX ^ WRITE_UPDATING;
+	const WRITE_NOT_CORKED = MAX ^ WRITE_CORKED;
 
 	// Combined shared state
 	const ACTIVE = READ_ACTIVE | WRITE_ACTIVE;
@@ -79268,7 +79296,8 @@ function requireStreamx () {
 	const READ_STATUS = OPEN_STATUS | READ_DONE | READ_QUEUED;
 	const READ_ENDING_STATUS = OPEN_STATUS | READ_ENDING | READ_QUEUED;
 	const READ_READABLE_STATUS = OPEN_STATUS | READ_EMIT_READABLE | READ_QUEUED | READ_EMITTED_READABLE;
-	const SHOULD_NOT_READ = OPEN_STATUS | READ_ACTIVE | READ_ENDING | READ_DONE | READ_NEEDS_PUSH | READ_READ_AHEAD;
+	const SHOULD_NOT_READ =
+	  OPEN_STATUS | READ_ACTIVE | READ_ENDING | READ_DONE | READ_NEEDS_PUSH | READ_READ_AHEAD;
 	const READ_BACKPRESSURE_STATUS = DESTROY_STATUS | READ_ENDING | READ_DONE;
 	const READ_UPDATE_SYNC_STATUS = READ_UPDATING | OPEN_STATUS | READ_NEXT_TICK | READ_PRIMARY;
 	const READ_NEXT_TICK_OR_OPENING = READ_NEXT_TICK | OPENING;
@@ -79289,7 +79318,10 @@ function requireStreamx () {
 	const asyncIterator = Symbol.asyncIterator || Symbol('asyncIterator');
 
 	class WritableState {
-	  constructor (stream, { highWaterMark = 16384, map = null, mapWritable, byteLength, byteLengthWritable } = {}) {
+	  constructor(
+	    stream,
+	    { highWaterMark = 16384, map = null, mapWritable, byteLength, byteLengthWritable } = {}
+	  ) {
 	    this.stream = stream;
 	    this.queue = new FIFO();
 	    this.highWaterMark = highWaterMark;
@@ -79303,11 +79335,15 @@ function requireStreamx () {
 	    this.afterUpdateNextTick = updateWriteNT.bind(this);
 	  }
 
-	  get ended () {
+	  get ending() {
+	    return (this.stream._duplexState & WRITE_FINISHING) !== 0
+	  }
+
+	  get ended() {
 	    return (this.stream._duplexState & WRITE_DONE) !== 0
 	  }
 
-	  push (data) {
+	  push(data) {
 	    if ((this.stream._duplexState & WRITE_DROP_DATA) !== 0) return false
 	    if (this.map !== null) data = this.map(data);
 
@@ -79323,7 +79359,7 @@ function requireStreamx () {
 	    return false
 	  }
 
-	  shift () {
+	  shift() {
 	    const data = this.queue.shift();
 
 	    this.buffered -= this.byteLength(data);
@@ -79332,13 +79368,13 @@ function requireStreamx () {
 	    return data
 	  }
 
-	  end (data) {
+	  end(data) {
 	    if (typeof data === 'function') this.stream.once('finish', data);
 	    else if (data !== undefined && data !== null) this.push(data);
 	    this.stream._duplexState = (this.stream._duplexState | WRITE_FINISHING) & WRITE_NON_PRIMARY;
 	  }
 
-	  autoBatch (data, cb) {
+	  autoBatch(data, cb) {
 	    const buffer = [];
 	    const stream = this.stream;
 
@@ -79351,7 +79387,7 @@ function requireStreamx () {
 	    stream._writev(buffer, cb);
 	  }
 
-	  update () {
+	  update() {
 	    const stream = this.stream;
 
 	    stream._duplexState |= WRITE_UPDATING;
@@ -79369,7 +79405,7 @@ function requireStreamx () {
 	    stream._duplexState &= WRITE_NOT_UPDATING;
 	  }
 
-	  updateNonPrimary () {
+	  updateNonPrimary() {
 	    const stream = this.stream;
 
 	    if ((stream._duplexState & WRITE_FINISHING_STATUS) === WRITE_FINISHING) {
@@ -79392,18 +79428,18 @@ function requireStreamx () {
 	    }
 	  }
 
-	  continueUpdate () {
+	  continueUpdate() {
 	    if ((this.stream._duplexState & WRITE_NEXT_TICK) === 0) return false
 	    this.stream._duplexState &= WRITE_NOT_NEXT_TICK;
 	    return true
 	  }
 
-	  updateCallback () {
+	  updateCallback() {
 	    if ((this.stream._duplexState & WRITE_UPDATE_SYNC_STATUS) === WRITE_PRIMARY) this.update();
 	    else this.updateNextTick();
 	  }
 
-	  updateNextTick () {
+	  updateNextTick() {
 	    if ((this.stream._duplexState & WRITE_NEXT_TICK) !== 0) return
 	    this.stream._duplexState |= WRITE_NEXT_TICK;
 	    if ((this.stream._duplexState & WRITE_UPDATING) === 0) qmt(this.afterUpdateNextTick);
@@ -79411,7 +79447,10 @@ function requireStreamx () {
 	}
 
 	class ReadableState {
-	  constructor (stream, { highWaterMark = 16384, map = null, mapReadable, byteLength, byteLengthReadable } = {}) {
+	  constructor(
+	    stream,
+	    { highWaterMark = 16384, map = null, mapReadable, byteLength, byteLengthReadable } = {}
+	  ) {
 	    this.stream = stream;
 	    this.queue = new FIFO();
 	    this.highWaterMark = highWaterMark === 0 ? 1 : highWaterMark;
@@ -79426,11 +79465,15 @@ function requireStreamx () {
 	    this.afterUpdateNextTick = updateReadNT.bind(this);
 	  }
 
-	  get ended () {
+	  get ending() {
+	    return (this.stream._duplexState & READ_ENDING) !== 0
+	  }
+
+	  get ended() {
 	    return (this.stream._duplexState & READ_DONE) !== 0
 	  }
 
-	  pipe (pipeTo, cb) {
+	  pipe(pipeTo, cb) {
 	    if (this.pipeTo !== null) throw new Error('Can only pipe to one destination')
 	    if (typeof cb !== 'function') cb = null;
 
@@ -79457,7 +79500,7 @@ function requireStreamx () {
 	    pipeTo.emit('pipe', this.stream);
 	  }
 
-	  push (data) {
+	  push(data) {
 	    const stream = this.stream;
 
 	    if (data === null) {
@@ -79482,7 +79525,7 @@ function requireStreamx () {
 	    return this.buffered < this.highWaterMark
 	  }
 
-	  shift () {
+	  shift() {
 	    const data = this.queue.shift();
 
 	    this.buffered -= this.byteLength(data);
@@ -79490,7 +79533,7 @@ function requireStreamx () {
 	    return data
 	  }
 
-	  unshift (data) {
+	  unshift(data) {
 	    const pending = [this.map !== null ? this.map(data) : data];
 	    while (this.buffered > 0) pending.push(this.shift());
 
@@ -79503,12 +79546,13 @@ function requireStreamx () {
 	    this.push(pending[pending.length - 1]);
 	  }
 
-	  read () {
+	  read() {
 	    const stream = this.stream;
 
 	    if ((stream._duplexState & READ_STATUS) === READ_QUEUED) {
 	      const data = this.shift();
-	      if (this.pipeTo !== null && this.pipeTo.write(data) === false) stream._duplexState &= READ_PIPE_NOT_DRAINED;
+	      if (this.pipeTo !== null && this.pipeTo.write(data) === false)
+	        stream._duplexState &= READ_PIPE_NOT_DRAINED;
 	      if ((stream._duplexState & READ_EMIT_DATA) !== 0) stream.emit('data', data);
 	      return data
 	    }
@@ -79521,17 +79565,21 @@ function requireStreamx () {
 	    return null
 	  }
 
-	  drain () {
+	  drain() {
 	    const stream = this.stream;
 
-	    while ((stream._duplexState & READ_STATUS) === READ_QUEUED && (stream._duplexState & READ_FLOWING) !== 0) {
+	    while (
+	      (stream._duplexState & READ_STATUS) === READ_QUEUED &&
+	      (stream._duplexState & READ_FLOWING) !== 0
+	    ) {
 	      const data = this.shift();
-	      if (this.pipeTo !== null && this.pipeTo.write(data) === false) stream._duplexState &= READ_PIPE_NOT_DRAINED;
+	      if (this.pipeTo !== null && this.pipeTo.write(data) === false)
+	        stream._duplexState &= READ_PIPE_NOT_DRAINED;
 	      if ((stream._duplexState & READ_EMIT_DATA) !== 0) stream.emit('data', data);
 	    }
 	  }
 
-	  update () {
+	  update() {
 	    const stream = this.stream;
 
 	    stream._duplexState |= READ_UPDATING;
@@ -79539,7 +79587,10 @@ function requireStreamx () {
 	    do {
 	      this.drain();
 
-	      while (this.buffered < this.highWaterMark && (stream._duplexState & SHOULD_NOT_READ) === READ_READ_AHEAD) {
+	      while (
+	        this.buffered < this.highWaterMark &&
+	        (stream._duplexState & SHOULD_NOT_READ) === READ_READ_AHEAD
+	      ) {
 	        stream._duplexState |= READ_ACTIVE_AND_NEEDS_PUSH;
 	        stream._read(this.afterRead);
 	        this.drain();
@@ -79556,7 +79607,7 @@ function requireStreamx () {
 	    stream._duplexState &= READ_NOT_UPDATING;
 	  }
 
-	  updateNonPrimary () {
+	  updateNonPrimary() {
 	    const stream = this.stream;
 
 	    if ((stream._duplexState & READ_ENDING_STATUS) === READ_ENDING) {
@@ -79580,24 +79631,24 @@ function requireStreamx () {
 	    }
 	  }
 
-	  continueUpdate () {
+	  continueUpdate() {
 	    if ((this.stream._duplexState & READ_NEXT_TICK) === 0) return false
 	    this.stream._duplexState &= READ_NOT_NEXT_TICK;
 	    return true
 	  }
 
-	  updateCallback () {
+	  updateCallback() {
 	    if ((this.stream._duplexState & READ_UPDATE_SYNC_STATUS) === READ_PRIMARY) this.update();
 	    else this.updateNextTick();
 	  }
 
-	  updateNextTickIfOpen () {
+	  updateNextTickIfOpen() {
 	    if ((this.stream._duplexState & READ_NEXT_TICK_OR_OPENING) !== 0) return
 	    this.stream._duplexState |= READ_NEXT_TICK;
 	    if ((this.stream._duplexState & READ_UPDATING) === 0) qmt(this.afterUpdateNextTick);
 	  }
 
-	  updateNextTick () {
+	  updateNextTick() {
 	    if ((this.stream._duplexState & READ_NEXT_TICK) !== 0) return
 	    this.stream._duplexState |= READ_NEXT_TICK;
 	    if ((this.stream._duplexState & READ_UPDATING) === 0) qmt(this.afterUpdateNextTick);
@@ -79605,7 +79656,7 @@ function requireStreamx () {
 	}
 
 	class TransformState {
-	  constructor (stream) {
+	  constructor(stream) {
 	    this.data = null;
 	    this.afterTransform = afterTransform.bind(stream);
 	    this.afterFinal = null;
@@ -79613,7 +79664,7 @@ function requireStreamx () {
 	}
 
 	class Pipeline {
-	  constructor (src, dst, cb) {
+	  constructor(src, dst, cb) {
 	    this.from = src;
 	    this.to = dst;
 	    this.afterPipe = cb;
@@ -79621,11 +79672,11 @@ function requireStreamx () {
 	    this.pipeToFinished = false;
 	  }
 
-	  finished () {
+	  finished() {
 	    this.pipeToFinished = true;
 	  }
 
-	  done (stream, err) {
+	  done(stream, err) {
 	    if (err) this.error = err;
 
 	    if (stream === this.to) {
@@ -79655,12 +79706,12 @@ function requireStreamx () {
 	  }
 	}
 
-	function afterDrain () {
+	function afterDrain() {
 	  this.stream._duplexState |= READ_PIPE_DRAINED;
 	  this.updateCallback();
 	}
 
-	function afterFinal (err) {
+	function afterFinal(err) {
 	  const stream = this.stream;
 	  if (err) stream.destroy(err);
 	  if ((stream._duplexState & DESTROY_STATUS) === 0) {
@@ -79678,7 +79729,7 @@ function requireStreamx () {
 	  else this.updateNextTick();
 	}
 
-	function afterDestroy (err) {
+	function afterDestroy(err) {
 	  const stream = this.stream;
 
 	  if (!err && this.error !== STREAM_DESTROYED) err = this.error;
@@ -79697,7 +79748,7 @@ function requireStreamx () {
 	  }
 	}
 
-	function afterWrite (err) {
+	function afterWrite(err) {
 	  const stream = this.stream;
 
 	  if (err) stream.destroy(err);
@@ -79715,28 +79766,29 @@ function requireStreamx () {
 	  this.updateCallback();
 	}
 
-	function afterRead (err) {
+	function afterRead(err) {
 	  if (err) this.stream.destroy(err);
 	  this.stream._duplexState &= READ_NOT_ACTIVE;
-	  if (this.readAhead === false && (this.stream._duplexState & READ_RESUMED) === 0) this.stream._duplexState &= READ_NO_READ_AHEAD;
+	  if (this.readAhead === false && (this.stream._duplexState & READ_RESUMED) === 0)
+	    this.stream._duplexState &= READ_NO_READ_AHEAD;
 	  this.updateCallback();
 	}
 
-	function updateReadNT () {
+	function updateReadNT() {
 	  if ((this.stream._duplexState & READ_UPDATING) === 0) {
 	    this.stream._duplexState &= READ_NOT_NEXT_TICK;
 	    this.update();
 	  }
 	}
 
-	function updateWriteNT () {
+	function updateWriteNT() {
 	  if ((this.stream._duplexState & WRITE_UPDATING) === 0) {
 	    this.stream._duplexState &= WRITE_NOT_NEXT_TICK;
 	    this.update();
 	  }
 	}
 
-	function tickDrains (drains) {
+	function tickDrains(drains) {
 	  for (let i = 0; i < drains.length; i++) {
 	    // drains.writes are monotonic, so if one is 0 its always the first one
 	    if (--drains[i].writes === 0) {
@@ -79746,7 +79798,7 @@ function requireStreamx () {
 	  }
 	}
 
-	function afterOpen (err) {
+	function afterOpen(err) {
 	  const stream = this.stream;
 
 	  if (err) stream.destroy(err);
@@ -79768,15 +79820,15 @@ function requireStreamx () {
 	  }
 	}
 
-	function afterTransform (err, data) {
+	function afterTransform(err, data) {
 	  if (data !== undefined && data !== null) this.push(data);
 	  this._writableState.afterWrite(err);
 	}
 
-	function newListener (name) {
+	function newListener(name) {
 	  if (this._readableState !== null) {
 	    if (name === 'data') {
-	      this._duplexState |= (READ_EMIT_DATA | READ_RESUMED_READ_AHEAD);
+	      this._duplexState |= READ_EMIT_DATA | READ_RESUMED_READ_AHEAD;
 	      this._readableState.updateNextTick();
 	    }
 	    if (name === 'readable') {
@@ -79794,7 +79846,7 @@ function requireStreamx () {
 	}
 
 	class Stream extends EventEmitter {
-	  constructor (opts) {
+	  constructor(opts) {
 	    super();
 
 	    this._duplexState = 0;
@@ -79813,35 +79865,35 @@ function requireStreamx () {
 	    this.on('newListener', newListener);
 	  }
 
-	  _open (cb) {
+	  _open(cb) {
 	    cb(null);
 	  }
 
-	  _destroy (cb) {
+	  _destroy(cb) {
 	    cb(null);
 	  }
 
-	  _predestroy () {
+	  _predestroy() {
 	    // does nothing
 	  }
 
-	  get readable () {
+	  get readable() {
 	    return this._readableState !== null ? true : undefined
 	  }
 
-	  get writable () {
+	  get writable() {
 	    return this._writableState !== null ? true : undefined
 	  }
 
-	  get destroyed () {
+	  get destroyed() {
 	    return (this._duplexState & DESTROYED) !== 0
 	  }
 
-	  get destroying () {
+	  get destroying() {
 	    return (this._duplexState & DESTROY_STATUS) !== 0
 	  }
 
-	  destroy (err) {
+	  destroy(err) {
 	    if ((this._duplexState & DESTROY_STATUS) === 0) {
 	      if (!err) err = STREAM_DESTROYED;
 	      this._duplexState = (this._duplexState | DESTROYING) & NON_PRIMARY;
@@ -79866,7 +79918,7 @@ function requireStreamx () {
 	}
 
 	class Readable extends Stream {
-	  constructor (opts) {
+	  constructor(opts) {
 	    super(opts);
 
 	    this._duplexState |= OPENING | WRITE_DONE | READ_READ_AHEAD;
@@ -79880,66 +79932,67 @@ function requireStreamx () {
 	    }
 	  }
 
-	  setEncoding (encoding) {
+	  setEncoding(encoding) {
 	    const dec = new TextDecoder(encoding);
 	    const map = this._readableState.map || echo;
 	    this._readableState.map = mapOrSkip;
 	    return this
 
-	    function mapOrSkip (data) {
+	    function mapOrSkip(data) {
 	      const next = dec.push(data);
 	      return next === '' && (data.byteLength !== 0 || dec.remaining > 0) ? null : map(next)
 	    }
 	  }
 
-	  _read (cb) {
+	  _read(cb) {
 	    cb(null);
 	  }
 
-	  pipe (dest, cb) {
+	  pipe(dest, cb) {
 	    this._readableState.updateNextTick();
 	    this._readableState.pipe(dest, cb);
 	    return dest
 	  }
 
-	  read () {
+	  read() {
 	    this._readableState.updateNextTick();
 	    return this._readableState.read()
 	  }
 
-	  push (data) {
+	  push(data) {
 	    this._readableState.updateNextTickIfOpen();
 	    return this._readableState.push(data)
 	  }
 
-	  unshift (data) {
+	  unshift(data) {
 	    this._readableState.updateNextTickIfOpen();
 	    return this._readableState.unshift(data)
 	  }
 
-	  resume () {
+	  resume() {
 	    this._duplexState |= READ_RESUMED_READ_AHEAD;
 	    this._readableState.updateNextTick();
 	    return this
 	  }
 
-	  pause () {
-	    this._duplexState &= (this._readableState.readAhead === false ? READ_PAUSED_NO_READ_AHEAD : READ_PAUSED);
+	  pause() {
+	    this._duplexState &=
+	      this._readableState.readAhead === false ? READ_PAUSED_NO_READ_AHEAD : READ_PAUSED;
 	    return this
 	  }
 
-	  static _fromAsyncIterator (ite, opts) {
+	  static _fromAsyncIterator(ite, opts) {
 	    let destroy;
 
 	    const rs = new Readable({
 	      ...opts,
-	      read (cb) {
+	      read(cb) {
 	        ite.next().then(push).then(cb.bind(null, null)).catch(cb);
 	      },
-	      predestroy () {
+	      predestroy() {
 	        destroy = ite.return();
 	      },
-	      destroy (cb) {
+	      destroy(cb) {
 	        if (!destroy) return cb(null)
 	        destroy.then(cb.bind(null, null)).catch(cb);
 	      }
@@ -79947,13 +80000,13 @@ function requireStreamx () {
 
 	    return rs
 
-	    function push (data) {
+	    function push(data) {
 	      if (data.done) rs.push(null);
 	      else rs.push(data.value);
 	    }
 	  }
 
-	  static from (data, opts) {
+	  static from(data, opts) {
 	    if (isReadStreamx(data)) return data
 	    if (data[asyncIterator]) return this._fromAsyncIterator(data[asyncIterator](), opts)
 	    if (!Array.isArray(data)) data = data === undefined ? [] : [data];
@@ -79961,37 +80014,42 @@ function requireStreamx () {
 	    let i = 0;
 	    return new Readable({
 	      ...opts,
-	      read (cb) {
+	      read(cb) {
 	        this.push(i === data.length ? null : data[i++]);
 	        cb(null);
 	      }
 	    })
 	  }
 
-	  static isBackpressured (rs) {
-	    return (rs._duplexState & READ_BACKPRESSURE_STATUS) !== 0 || rs._readableState.buffered >= rs._readableState.highWaterMark
+	  static isBackpressured(rs) {
+	    return (
+	      (rs._duplexState & READ_BACKPRESSURE_STATUS) !== 0 ||
+	      rs._readableState.buffered >= rs._readableState.highWaterMark
+	    )
 	  }
 
-	  static isPaused (rs) {
+	  static isPaused(rs) {
 	    return (rs._duplexState & READ_RESUMED) === 0
 	  }
 
-	  [asyncIterator] () {
+	  [asyncIterator]() {
 	    const stream = this;
 
 	    let error = null;
 	    let promiseResolve = null;
 	    let promiseReject = null;
 
-	    this.on('error', (err) => { error = err; });
+	    this.on('error', (err) => {
+	      error = err;
+	    });
 	    this.on('readable', onreadable);
 	    this.on('close', onclose);
 
 	    return {
-	      [asyncIterator] () {
+	      [asyncIterator]() {
 	        return this
 	      },
-	      next () {
+	      next() {
 	        return new Promise(function (resolve, reject) {
 	          promiseResolve = resolve;
 	          promiseReject = reject;
@@ -80000,31 +80058,32 @@ function requireStreamx () {
 	          else if ((stream._duplexState & DESTROYED) !== 0) ondata(null);
 	        })
 	      },
-	      return () {
+	      return() {
 	        return destroy(null)
 	      },
-	      throw (err) {
+	      throw(err) {
 	        return destroy(err)
 	      }
 	    }
 
-	    function onreadable () {
+	    function onreadable() {
 	      if (promiseResolve !== null) ondata(stream.read());
 	    }
 
-	    function onclose () {
+	    function onclose() {
 	      if (promiseResolve !== null) ondata(null);
 	    }
 
-	    function ondata (data) {
+	    function ondata(data) {
 	      if (promiseReject === null) return
 	      if (error) promiseReject(error);
-	      else if (data === null && (stream._duplexState & READ_DONE) === 0) promiseReject(STREAM_DESTROYED);
+	      else if (data === null && (stream._duplexState & READ_DONE) === 0)
+	        promiseReject(STREAM_DESTROYED);
 	      else promiseResolve({ value: data, done: data === null });
 	      promiseReject = promiseResolve = null;
 	    }
 
-	    function destroy (err) {
+	    function destroy(err) {
 	      stream.destroy(err);
 	      return new Promise((resolve, reject) => {
 	        if (stream._duplexState & DESTROYED) return resolve({ value: undefined, done: true })
@@ -80038,7 +80097,7 @@ function requireStreamx () {
 	}
 
 	class Writable extends Stream {
-	  constructor (opts) {
+	  constructor(opts) {
 	    super(opts);
 
 	    this._duplexState |= OPENING | READ_DONE;
@@ -80052,36 +80111,36 @@ function requireStreamx () {
 	    }
 	  }
 
-	  cork () {
+	  cork() {
 	    this._duplexState |= WRITE_CORKED;
 	  }
 
-	  uncork () {
+	  uncork() {
 	    this._duplexState &= WRITE_NOT_CORKED;
 	    this._writableState.updateNextTick();
 	  }
 
-	  _writev (batch, cb) {
+	  _writev(batch, cb) {
 	    cb(null);
 	  }
 
-	  _write (data, cb) {
+	  _write(data, cb) {
 	    this._writableState.autoBatch(data, cb);
 	  }
 
-	  _final (cb) {
+	  _final(cb) {
 	    cb(null);
 	  }
 
-	  static isBackpressured (ws) {
+	  static isBackpressured(ws) {
 	    return (ws._duplexState & WRITE_BACKPRESSURE_STATUS) !== 0
 	  }
 
-	  static drained (ws) {
+	  static drained(ws) {
 	    if (ws.destroyed) return Promise.resolve(false)
 	    const state = ws._writableState;
-	    const pending = (isWritev(ws) ? Math.min(1, state.queue.length) : state.queue.length);
-	    const writes = pending + ((ws._duplexState & WRITE_WRITING) ? 1 : 0);
+	    const pending = isWritev(ws) ? Math.min(1, state.queue.length) : state.queue.length;
+	    const writes = pending + (ws._duplexState & WRITE_WRITING ? 1 : 0);
 	    if (writes === 0) return Promise.resolve(true)
 	    if (state.drains === null) state.drains = [];
 	    return new Promise((resolve) => {
@@ -80089,20 +80148,21 @@ function requireStreamx () {
 	    })
 	  }
 
-	  write (data) {
+	  write(data) {
 	    this._writableState.updateNextTick();
 	    return this._writableState.push(data)
 	  }
 
-	  end (data) {
+	  end(data) {
 	    this._writableState.updateNextTick();
 	    this._writableState.end(data);
 	    return this
 	  }
 	}
 
-	class Duplex extends Readable { // and Writable
-	  constructor (opts) {
+	class Duplex extends Readable {
+	  // and Writable
+	  constructor(opts) {
 	    super(opts);
 
 	    this._duplexState = OPENING | (this._duplexState & READ_READ_AHEAD);
@@ -80115,33 +80175,33 @@ function requireStreamx () {
 	    }
 	  }
 
-	  cork () {
+	  cork() {
 	    this._duplexState |= WRITE_CORKED;
 	  }
 
-	  uncork () {
+	  uncork() {
 	    this._duplexState &= WRITE_NOT_CORKED;
 	    this._writableState.updateNextTick();
 	  }
 
-	  _writev (batch, cb) {
+	  _writev(batch, cb) {
 	    cb(null);
 	  }
 
-	  _write (data, cb) {
+	  _write(data, cb) {
 	    this._writableState.autoBatch(data, cb);
 	  }
 
-	  _final (cb) {
+	  _final(cb) {
 	    cb(null);
 	  }
 
-	  write (data) {
+	  write(data) {
 	    this._writableState.updateNextTick();
 	    return this._writableState.push(data)
 	  }
 
-	  end (data) {
+	  end(data) {
 	    this._writableState.updateNextTick();
 	    this._writableState.end(data);
 	    return this
@@ -80149,7 +80209,7 @@ function requireStreamx () {
 	}
 
 	class Transform extends Duplex {
-	  constructor (opts) {
+	  constructor(opts) {
 	    super(opts);
 	    this._transformState = new TransformState(this);
 
@@ -80159,7 +80219,7 @@ function requireStreamx () {
 	    }
 	  }
 
-	  _write (data, cb) {
+	  _write(data, cb) {
 	    if (this._readableState.buffered >= this._readableState.highWaterMark) {
 	      this._transformState.data = data;
 	    } else {
@@ -80167,7 +80227,7 @@ function requireStreamx () {
 	    }
 	  }
 
-	  _read (cb) {
+	  _read(cb) {
 	    if (this._transformState.data !== null) {
 	      const data = this._transformState.data;
 	      this._transformState.data = null;
@@ -80178,7 +80238,7 @@ function requireStreamx () {
 	    }
 	  }
 
-	  destroy (err) {
+	  destroy(err) {
 	    super.destroy(err);
 	    if (this._transformState.data !== null) {
 	      this._transformState.data = null;
@@ -80186,15 +80246,15 @@ function requireStreamx () {
 	    }
 	  }
 
-	  _transform (data, cb) {
+	  _transform(data, cb) {
 	    cb(null, data);
 	  }
 
-	  _flush (cb) {
+	  _flush(cb) {
 	    cb(null);
 	  }
 
-	  _final (cb) {
+	  _final(cb) {
 	    this._transformState.afterFinal = cb;
 	    this._flush(transformAfterFlush.bind(this));
 	  }
@@ -80202,7 +80262,7 @@ function requireStreamx () {
 
 	class PassThrough extends Transform {}
 
-	function transformAfterFlush (err, data) {
+	function transformAfterFlush(err, data) {
 	  const cb = this._transformState.afterFinal;
 	  if (err) return cb(err)
 	  if (data !== null && data !== undefined) this.push(data);
@@ -80210,7 +80270,7 @@ function requireStreamx () {
 	  cb(null);
 	}
 
-	function pipelinePromise (...streams) {
+	function pipelinePromise(...streams) {
 	  return new Promise((resolve, reject) => {
 	    return pipeline(...streams, (err) => {
 	      if (err) return reject(err)
@@ -80219,9 +80279,9 @@ function requireStreamx () {
 	  })
 	}
 
-	function pipeline (stream, ...streams) {
+	function pipeline(stream, ...streams) {
 	  const all = Array.isArray(stream) ? [...stream, ...streams] : [stream, ...streams];
-	  const done = (all.length && typeof all[all.length - 1] === 'function') ? all.pop() : null;
+	  const done = all.length && typeof all[all.length - 1] === 'function' ? all.pop() : null;
 
 	  if (all.length < 2) throw new Error('Pipeline requires at least 2 streams')
 
@@ -80245,7 +80305,8 @@ function requireStreamx () {
 	  if (done) {
 	    let fin = false;
 
-	    const autoDestroy = isStreamx(dest) || !!(dest._writableState && dest._writableState.autoDestroy);
+	    const autoDestroy =
+	      isStreamx(dest) || !!(dest._writableState && dest._writableState.autoDestroy);
 
 	    dest.on('error', (err) => {
 	      if (error === null) error = err;
@@ -80263,17 +80324,17 @@ function requireStreamx () {
 
 	  return dest
 
-	  function errorHandle (s, rd, wr, onerror) {
+	  function errorHandle(s, rd, wr, onerror) {
 	    s.on('error', onerror);
 	    s.on('close', onclose);
 
-	    function onclose () {
+	    function onclose() {
 	      if (s._readableState && !s._readableState.ended) return onerror(PREMATURE_CLOSE)
 	      if (wr && s._writableState && !s._writableState.ended) return onerror(PREMATURE_CLOSE)
 	    }
 	  }
 
-	  function onerror (err) {
+	  function onerror(err) {
 	    if (!err || error) return
 	    error = err;
 
@@ -80283,56 +80344,70 @@ function requireStreamx () {
 	  }
 	}
 
-	function echo (s) {
+	function echo(s) {
 	  return s
 	}
 
-	function isStream (stream) {
+	function isStream(stream) {
 	  return !!stream._readableState || !!stream._writableState
 	}
 
-	function isStreamx (stream) {
+	function isStreamx(stream) {
 	  return typeof stream._duplexState === 'number' && isStream(stream)
 	}
 
-	function isEnded (stream) {
+	function isEnding(stream) {
+	  return !!stream._readableState && stream._readableState.ending
+	}
+
+	function isEnded(stream) {
 	  return !!stream._readableState && stream._readableState.ended
 	}
 
-	function isFinished (stream) {
+	function isFinishing(stream) {
+	  return !!stream._writableState && stream._writableState.ending
+	}
+
+	function isFinished(stream) {
 	  return !!stream._writableState && stream._writableState.ended
 	}
 
-	function getStreamError (stream, opts = {}) {
-	  const err = (stream._readableState && stream._readableState.error) || (stream._writableState && stream._writableState.error);
+	function getStreamError(stream, opts = {}) {
+	  const err =
+	    (stream._readableState && stream._readableState.error) ||
+	    (stream._writableState && stream._writableState.error);
 
 	  // avoid implicit errors by default
-	  return (!opts.all && err === STREAM_DESTROYED) ? null : err
+	  return !opts.all && err === STREAM_DESTROYED ? null : err
 	}
 
-	function isReadStreamx (stream) {
+	function isReadStreamx(stream) {
 	  return isStreamx(stream) && stream.readable
 	}
 
-	function isDisturbed (stream) {
-	  return (stream._duplexState & OPENING) !== OPENING || (stream._duplexState & ACTIVE_OR_TICKING) !== 0
+	function isDisturbed(stream) {
+	  return (
+	    (stream._duplexState & OPENING) !== OPENING ||
+	    (stream._duplexState & DESTROYING) === DESTROYING ||
+	    (stream._duplexState & ACTIVE_OR_TICKING) !== 0
+	  )
 	}
 
-	function isTypedArray (data) {
+	function isTypedArray(data) {
 	  return typeof data === 'object' && data !== null && typeof data.byteLength === 'number'
 	}
 
-	function defaultByteLength (data) {
+	function defaultByteLength(data) {
 	  return isTypedArray(data) ? data.byteLength : 1024
 	}
 
-	function noop () {}
+	function noop() {}
 
-	function abort () {
+	function abort() {
 	  this.destroy(new Error('Stream aborted.'));
 	}
 
-	function isWritev (s) {
+	function isWritev(s) {
 	  return s._writev !== Writable.prototype._writev && s._writev !== Duplex.prototype._writev
 	}
 
@@ -80341,7 +80416,9 @@ function requireStreamx () {
 	  pipelinePromise,
 	  isStream,
 	  isStreamx,
+	  isEnding,
 	  isEnded,
+	  isFinishing,
 	  isFinished,
 	  isDisturbed,
 	  getStreamError,
