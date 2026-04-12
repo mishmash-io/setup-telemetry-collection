@@ -1,17 +1,17 @@
 {
   "name": "javascript-action",
-  "description": "GitHub Actions JavaScript Template",
+  "description": "Setup telemetry collection GitHub action",
   "version": "0.0.0",
   "author": "",
   "type": "module",
   "private": true,
-  "homepage": "https://github.com/actions/javascript-action#readme",
+  "homepage": "https://github.com/mishmash-io/setup-telemetry-collection#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/actions/javascript-action.git"
+    "url": "git+https://github.com/mishmash-io/setup-telemetry-collection.git"
   },
   "bugs": {
-    "url": "https://github.com/actions/javascript-action/issues"
+    "url": "https://github.com/mishmash-io/setup-telemetry-collection/issues"
   },
   "keywords": [
     "actions"
