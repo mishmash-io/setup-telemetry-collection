@@ -47,7 +47,7 @@ inputs:
   emit-own-telemetry:
     description: Set to 'true' to also emit own telemetry (useful for debugging)
     required: false
-    defualt: 'false'
+    default: false
   collect-host-metrics:
     description: Collect host metrics like CPU and memory usage, etc
     required: false
