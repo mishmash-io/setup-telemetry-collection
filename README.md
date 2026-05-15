@@ -150,7 +150,7 @@ workflow configuration:
     # to setup java instrumentation:
     instrument-java: true
     # optionally set a version of the OpenTelemetry java agent:
-    java-agent-version: 2.26.1
+    java-agent-version: 2.27.0
     # (optional) if you have a tool cache enabled on your worker you can use it to cache the download
     cache-agents: true
     ...
@@ -187,7 +187,7 @@ steps you can get the `java-agent` output of this action. Do it like this:
     # to setup java instrumentation:
     instrument-java: true
     # optionally set a version of the OpenTelemetry java agent:
-    java-agent-version: 2.26.1
+    java-agent-version: 2.27.0
     ...
 
 - name: Run auto-instrumented java

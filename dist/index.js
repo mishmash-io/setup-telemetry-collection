@@ -85904,6 +85904,9 @@ async function run() {
     const saveProfiles = getBooleanInput('save-profiles', {
       required: false
     });
+    const emitOwn = getBooleanInput('emit-own-telemetry', {
+      required: false
+    });
 
     const resourceAttrs = buildResourceAttributes();
     const resourceAttrsFlat = Object.entries(resourceAttrs)
@@ -85911,7 +85914,11 @@ async function run() {
       .join(',');
 
     const signalsPath = await createTempDir();
-    const containerId = await launchServer(signalsPath, resourceAttrsFlat);
+    const containerId = await launchServer(
+      signalsPath,
+      resourceAttrsFlat,
+      emitOwn
+    );
 
     if (containerId) {
       saveState('containerId', containerId);
@@ -85999,7 +86006,7 @@ async function setupJava(shouldCache) {
     'open-telemetry',
     'opentelemetry-java-instrumentation',
     agentVersion,
-    '2.26.1'
+    '2.27.0'
   );
 
   let javaAgentPath = '';
@@ -86308,7 +86315,7 @@ function getOctokit() {
   return getOctokit$1(token)
 }
 
-async function launchServer(tempDir, defaultAttrs) {
+async function launchServer(tempDir, defaultAttrs, emitOwn) {
   const grpcPort = +getInput('grpc-port', {
     required: false
   });
@@ -86339,6 +86346,8 @@ async function launchServer(tempDir, defaultAttrs) {
       '-d',
       '-e',
       `DEFAULT_RESOURCE_ATTRIBUTES=${defaultAttrs}`,
+      '-e',
+      `OWN_TELEMETRY_ENABLE=${emitOwn}`,
       '-p',
       `${grpcPort}:4317`,
       '-p',
