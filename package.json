@@ -40,7 +40,7 @@
     "@actions/artifact": "^6.2.1",
     "@actions/core": "^3.0.1",
     "@actions/exec": "^3.0.0",
-    "@actions/github": "^9.1.1",
+    "@actions/github": "9.1.1",
     "@actions/glob": "^0.7.0",
     "@actions/tool-cache": "^4.0.0",
     "@eslint/js": "^10.0.1",
@@ -50,7 +50,7 @@
   "devDependencies": {
     "@eslint/compat": "^2.1.0",
     "@eslint/eslintrc": "^3.3.5",
-    "@github/local-action": "^7.0.1",
+    "@github/local-action": "7.0.1",
     "@jest/globals": "^30.4.1",
     "@rollup/plugin-commonjs": "^29.0.3",
     "@rollup/plugin-node-resolve": "^16.0.3",
@@ -72,11 +72,17 @@
     "@actions/http-client@4.0.0": {
       "undici": "6.27.0"
     },
+    "@actions/http-client@2.2.3": {
+      "undici": "6.27.0"
+    },
     "@actions/http-client@3.0.2": {
       "undici": "6.27.0"
     },
-    "@actions/github": {
+    "@actions/github@9.1.1": {
       "undici": "6.27.0"
+    },
+    "@github/local-action@7.0.1": {
+      "@actions/github": "9.1.1"
     },
     "eslint-plugin-import": {
       "eslint": "10.6.0"
