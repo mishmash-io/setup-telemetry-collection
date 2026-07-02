@@ -54,16 +54,16 @@
     "@jest/globals": "^30.4.1",
     "@rollup/plugin-commonjs": "^29.0.3",
     "@rollup/plugin-node-resolve": "^16.0.3",
-    "eslint": "^10.5.0",
+    "eslint": "^10.6.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-import": "^2.32.0",
-    "eslint-plugin-jest": "^29.15.2",
+    "eslint-plugin-jest": "^29.15.4",
     "eslint-plugin-prettier": "^5.5.6",
     "jest": "^30.4.2",
     "make-coverage-badge": "^1.2.0",
-    "prettier": "^3.8.4",
-    "prettier-eslint": "^17.1.0",
-    "rollup": "^4.62.0"
+    "prettier": "^3.9.4",
+    "prettier-eslint": "^17.1.1",
+    "rollup": "^4.62.2"
   },
   "optionalDependencies": {
     "@rollup/rollup-linux-x64-gnu": "*"
@@ -79,7 +79,7 @@
       "undici": "6.27.0"
     },
     "eslint-plugin-import": {
-      "eslint": "10.5.0"
+      "eslint": "10.6.0"
     },
     "@typescript-eslint/typescript-estree@6.21.0": {
       "minimatch": "9.0.9"
