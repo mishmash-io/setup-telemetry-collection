@@ -69,6 +69,15 @@
     "@rollup/rollup-linux-x64-gnu": "*"
   },
   "overrides": {
+    "@actions/http-client@4.0.0": {
+      "undici": "6.27.0"
+    },
+    "@actions/http-client@3.0.2": {
+      "undici": "6.27.0"
+    },
+    "@actions/github": {
+      "undici": "6.27.0"
+    },
     "eslint-plugin-import": {
       "eslint": "10.5.0"
     },
