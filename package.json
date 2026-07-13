@@ -94,7 +94,7 @@
       "js-yaml": "4.3.0"
     },
     "eslint-plugin-import": {
-      "eslint": "10.6.0"
+      "eslint": "10.7.0"
     },
     "@typescript-eslint/typescript-estree@6.21.0": {
       "minimatch": "9.0.9"
