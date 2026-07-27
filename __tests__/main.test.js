@@ -97,7 +97,7 @@ describe('main.js', () => {
       1,
       'java-agent',
       expect.stringMatching(
-        '/path/to/test-tool/opentelemetry-java-agent/2.29.0/opentelemetry-javaagent.jar'
+        '/path/to/test-tool/opentelemetry-java-agent/2.30.0/opentelemetry-javaagent.jar'
       )
     )
 
