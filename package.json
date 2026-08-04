@@ -70,16 +70,16 @@
   },
   "overrides": {
     "@actions/http-client@4.0.0": {
-      "undici": "6.27.0"
+      "undici": "6.28.0"
     },
     "@actions/http-client@2.2.3": {
-      "undici": "6.27.0"
+      "undici": "6.28.0"
     },
     "@actions/http-client@3.0.2": {
-      "undici": "6.27.0"
+      "undici": "6.28.0"
     },
     "@actions/github@9.1.1": {
-      "undici": "6.27.0"
+      "undici": "6.28.0"
     },
     "@github/local-action@7.0.1": {
       "@actions/github": "9.1.1"
