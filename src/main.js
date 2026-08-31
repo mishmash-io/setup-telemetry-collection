@@ -405,7 +405,7 @@ async function setupJava(shouldCache) {
     'open-telemetry',
     'opentelemetry-java-instrumentation',
     agentVersion,
-    '2.30.0'
+    '2.31.1'
   )
 
   let javaAgentPath = ''
