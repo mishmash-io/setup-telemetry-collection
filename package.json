@@ -61,9 +61,9 @@
     "eslint-plugin-prettier": "^5.5.6",
     "jest": "^30.5.1",
     "make-coverage-badge": "^1.2.0",
-    "prettier": "^3.9.6",
+    "prettier": "^3.9.8",
     "prettier-eslint": "^17.1.2",
-    "rollup": "^4.63.1"
+    "rollup": "^4.63.3"
   },
   "optionalDependencies": {
     "@rollup/rollup-linux-x64-gnu": "*"
