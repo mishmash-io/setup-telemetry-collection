@@ -45,7 +45,7 @@
     "@actions/tool-cache": "^4.0.0",
     "@eslint/js": "^10.0.1",
     "@rollup/plugin-json": "^6.1.0",
-    "globals": "^17.12.0"
+    "globals": "^17.13.0"
   },
   "devDependencies": {
     "@eslint/compat": "^2.1.1",
@@ -70,16 +70,13 @@
   },
   "overrides": {
     "@actions/http-client@4.0.0": {
-      "undici": "6.28.0"
-    },
-    "@actions/http-client@2.2.3": {
-      "undici": "6.28.0"
+      "undici": "6.28.1"
     },
     "@actions/http-client@3.0.2": {
-      "undici": "6.28.0"
+      "undici": "6.28.1"
     },
     "@actions/github@9.1.1": {
-      "undici": "6.28.0"
+      "undici": "6.28.1"
     },
     "@github/local-action@7.0.1": {
       "@actions/github": "9.1.1"
@@ -99,17 +96,14 @@
     "@typescript-eslint/typescript-estree@6.21.0": {
       "minimatch": "9.0.9"
     },
-    "minimatch@10.2.5": {
-      "brace-expansion": "5.0.9"
-    },
     "minimatch@9.0.9": {
-      "brace-expansion": "2.1.4"
+      "brace-expansion": "2.1.7"
     },
     "minimatch@5.1.9": {
-      "brace-expansion": "2.1.4"
+      "brace-expansion": "2.1.7"
     },
     "minimatch@3.1.5": {
-      "brace-expansion": "1.1.16"
+      "brace-expansion": "1.1.21"
     }
   }
 }
