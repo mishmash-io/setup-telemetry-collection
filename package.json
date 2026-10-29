@@ -63,20 +63,20 @@
     "make-coverage-badge": "^1.2.0",
     "prettier": "^3.9.10",
     "prettier-eslint": "^17.1.2",
-    "rollup": "^4.64.12"
+    "rollup": "^4.65.0"
   },
   "optionalDependencies": {
     "@rollup/rollup-linux-x64-gnu": "*"
   },
   "overrides": {
     "@actions/http-client@4.0.0": {
-      "undici": "6.28.1"
+      "undici": "6.29.1"
     },
     "@actions/http-client@3.0.2": {
-      "undici": "6.28.1"
+      "undici": "6.29.1"
     },
     "@actions/github@9.1.1": {
-      "undici": "6.28.1"
+      "undici": "6.29.1"
     },
     "@github/local-action@7.0.1": {
       "@actions/github": "9.1.1"
